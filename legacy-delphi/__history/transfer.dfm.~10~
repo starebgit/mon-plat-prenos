@@ -1,0 +1,174 @@
+object FTransfer: TFTransfer
+  Left = 0
+  Top = 0
+  Caption = 'FTransfer'
+  ClientHeight = 412
+  ClientWidth = 852
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -11
+  Font.Name = 'Tahoma'
+  Font.Style = []
+  OldCreateOrder = False
+  OnCreate = FormCreate
+  PixelsPerInch = 96
+  TextHeight = 13
+  object SAPLogonControl1: TSAPLogonControl
+    Left = 616
+    Top = 40
+    Width = 100
+    Height = 50
+    ParentColor = False
+    ParentFont = False
+    TabOrder = 0
+    ControlData = {
+      01000100560A00002B050000470000000A26522F33204C6F676F6E050000FFFF
+      010A26522F33204C6F676F6E0F5341504C6F676F6E436F6E74726F6C00000000
+      000000000000000000}
+  end
+  object SAPFunctions1: TSAPFunctions
+    Left = 640
+    Top = 128
+    Width = 32
+    Height = 32
+    ControlData = {
+      00000500560A00002B05000000000000000000000000D64449B20115CF118981
+      0000E8A49FA001000100560A00002B050000470000000A26522F33204C6F676F
+      6EFFFFFF00000352E30B918FCE119DE300AA004BB85101EE00009001C0D40100
+      0C4D53205368656C6C20446C67010A26522F33204C6F676F6E1246756E637469
+      6F6E204F4358204C6F676F6E00000000000000000000000000000352E30B918F
+      CE119DE300AA004BB85101EE00009001C0D401000C4D53205368656C6C20446C
+      6700000000}
+  end
+  object ADOQuery2: TADOQuery
+    Connection = ADOConnection1
+    CursorType = ctStatic
+    Parameters = <>
+    SQL.Strings = (
+      'select * from plosce')
+    Left = 48
+    Top = 104
+    object ADOQuery2ident: TAutoIncField
+      FieldName = 'ident'
+      ReadOnly = True
+    end
+    object ADOQuery2stev: TWordField
+      FieldName = 'stev'
+    end
+    object ADOQuery2nalog: TStringField
+      FieldName = 'nalog'
+      Size = 12
+    end
+    object ADOQuery2koda: TStringField
+      FieldName = 'koda'
+      Size = 18
+    end
+    object ADOQuery2kolicina: TIntegerField
+      FieldName = 'kolicina'
+    end
+    object ADOQuery2dan: TDateTimeField
+      FieldName = 'dan'
+    end
+    object ADOQuery2danstart: TDateTimeField
+      FieldName = 'danstart'
+    end
+    object ADOQuery2izmena: TWordField
+      FieldName = 'izmena'
+    end
+  end
+  object ADOQuery3: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 48
+    Top = 168
+  end
+  object ADOQuery4: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 48
+    Top = 240
+  end
+  object ADOQuery5: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 56
+    Top = 328
+  end
+  object ADOQuery6: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 168
+    Top = 40
+  end
+  object ADOQuery7: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 160
+    Top = 112
+  end
+  object ADOQuery8: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 160
+    Top = 168
+  end
+  object ADOQuery9: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 152
+    Top = 256
+  end
+  object ADOQuery10: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 160
+    Top = 336
+  end
+  object ADOTable1: TADOTable
+    Connection = ADOConnection1
+    CursorType = ctStatic
+    TableName = 'Trakovi'
+    Left = 336
+    Top = 48
+    object ADOTable1stev: TWordField
+      FieldName = 'stev'
+      ReadOnly = True
+    end
+    object ADOTable1naziv: TStringField
+      FieldName = 'naziv'
+      Size = 10
+    end
+    object ADOTable1koda: TStringField
+      FieldName = 'koda'
+      Size = 8
+    end
+    object ADOTable1kapaciteta: TIntegerField
+      FieldName = 'kapaciteta'
+    end
+    object ADOTable1vsota: TIntegerField
+      FieldName = 'vsota'
+    end
+  end
+  object ADOTable2: TADOTable
+    Connection = ADOConnection1
+    Left = 328
+    Top = 112
+  end
+  object ADOConnection1: TADOConnection
+    ConnectionString = 
+      'Provider=SQLOLEDB.1;Integrated Security=SSPI;Persist Security In' +
+      'fo=False;Initial Catalog=MontPlat;Data Source=172.20.11.155\tssp' +
+      'ica;'
+    LoginPrompt = False
+    Provider = 'SQLOLEDB.1'
+    Left = 464
+    Top = 48
+  end
+  object Zadnji: TADOQuery
+    Connection = ADOConnection1
+    Parameters = <>
+    Left = 560
+    Top = 232
+  end
+end

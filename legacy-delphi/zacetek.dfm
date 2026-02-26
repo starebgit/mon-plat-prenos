@@ -1,0 +1,62 @@
+object Fzacetek: TFzacetek
+  Left = 0
+  Top = 0
+  Caption = 'Fzacetek'
+  ClientHeight = 303
+  ClientWidth = 645
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -11
+  Font.Name = 'Tahoma'
+  Font.Style = []
+  OldCreateOrder = False
+  OnActivate = FormActivate
+  PixelsPerInch = 96
+  TextHeight = 13
+  object Label1: TLabel
+    Left = 216
+    Top = 138
+    Width = 4
+    Height = 16
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -13
+    Font.Name = 'Tahoma'
+    Font.Style = []
+    ParentFont = False
+  end
+  object Label2: TLabel
+    Left = 448
+    Top = 272
+    Width = 3
+    Height = 13
+  end
+  object Button1: TButton
+    Left = 264
+    Top = 72
+    Width = 75
+    Height = 25
+    Caption = 'Prenos'
+    TabOrder = 0
+    OnClick = Button1Click
+  end
+  object ProgressBar1: TProgressBar
+    Left = 216
+    Top = 160
+    Width = 177
+    Height = 25
+    TabOrder = 1
+    Visible = False
+  end
+  object Button2: TButton
+    Left = 440
+    Top = 104
+    Width = 75
+    Height = 25
+    Caption = 'Button2'
+    TabOrder = 2
+    Visible = False
+    OnClick = Button2Click
+  end
+end

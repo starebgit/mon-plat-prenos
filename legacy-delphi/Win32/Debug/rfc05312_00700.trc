@@ -1,0 +1,22 @@
+
+**** Trace file opened at 20180619 094652 Srednjeevropski poletni èas  , by PrenosPlat
+**** Versions SAP-REL 720,0,119 RFC-VER nU 3  MT-SL
+
+
+>>> RfcOpenEx ...
+ Got following connect_param string: 
+   USER=edos_rfc_1 CLIENT=101 LANG=sl PASSWD=******* SYSNR=20 ASHOST=10.0.2.41 ICCE=1 GETSSO2=1 PCS=1 
+<<< RfcOpenEx failed
+
+>TS> Tue Jun 19 09:47:06 2018
+Error in program 'PrenosPlat': ======> Ime ali geslo ni pravilno (Prosim ponovite prijavo)
+
+**** Trace file opened at 20180619 094706 Srednjeevropski poletni èas  , by PrenosPlat
+**** Versions SAP-REL 720,0,119 RFC-VER nU 3  MT-SL
+
+
+>>> RfcOpenEx ...
+ Got following connect_param string: 
+   USER=edos_rfc_1 CLIENT=101 LANG=sl PASSWD=******* SYSNR=20 ASHOST=10.0.2.41 ICCE=1 GETSSO2=1 PCS=1 
+<<< RfcOpenEx failed
+

@@ -1,0 +1,27 @@
+program PrenosPlat;
+
+uses
+  Vcl.Forms,
+  zacetek in 'zacetek.pas' {Fzacetek},
+  izvedi in 'izvedi.pas' {Fizvedi},
+  PrijavaSAP in '..\..\..\PTC2\Generic\PrijavaSAP.pas' {FprijavaSAP},
+  deklar in '..\..\..\PTC2\Generic\deklar.pas',
+  VpisPrijava in '..\..\..\PTC2\Generic\VpisPrijava.pas' {FVpisPrijava},
+  transfer in 'transfer.pas' {FTransfer},
+  prikluci in 'prikluci.pas' {Fprikluci},
+  stroji in 'stroji.pas' {Fstroji};
+
+{$R *.res}
+
+begin
+  Application.Initialize;
+  Application.MainFormOnTaskbar := True;
+  Application.CreateForm(TFzacetek, Fzacetek);
+  Application.CreateForm(TFizvedi, Fizvedi);
+  Application.CreateForm(TFprijavaSAP, FprijavaSAP);
+  Application.CreateForm(TFVpisPrijava, FVpisPrijava);
+  Application.CreateForm(TFTransfer, FTransfer);
+  Application.CreateForm(TFprikluci, Fprikluci);
+  Application.CreateForm(TFstroji, Fstroji);
+  Application.Run;
+end.

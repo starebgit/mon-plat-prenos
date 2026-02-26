@@ -1,0 +1,79 @@
+unit zacetek;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.StdCtrls, izvedi;
+
+type
+  TFzacetek = class(TForm)
+    Button1: TButton;
+    ProgressBar1: TProgressBar;
+    Label1: TLabel;
+    Label2: TLabel;
+    Button2: TButton;
+    procedure FormActivate(Sender: TObject);
+    procedure Button1Click(Sender: TObject);
+    procedure Button2Click(Sender: TObject);
+  private
+    rrac : boolean ;
+  public
+    prenos : Tprenos ;
+  end;
+
+var
+  Fzacetek: TFzacetek;
+
+implementation
+
+{$R *.dfm}
+uses transfer ;
+
+procedure TFzacetek.Button1Click(Sender: TObject);
+begin
+  if rrac  then
+  begin
+   {Prenos := Tprenos.Create( True );
+    prenos.FreeOnTerminate := True;
+    prenos.Priority := tpLower ;
+    prenos.Resume;     }
+    button1.Caption := 'Prekini' ;
+    rrac := false ;
+   // ReportMemoryLeaksOnShutdown := true  ;
+    FTransfer.Getprenos ;
+  end else
+  begin
+    if Assigned(prenos) then Prenos.Terminate;
+    Button1.Caption := 'Prenos' ;
+    label1.Caption := '' ;
+    Screen.Cursor := crDefault ;
+    Progressbar1.Visible := false ;
+    rrac := true ;
+  end;
+end;
+
+
+procedure TFzacetek.Button2Click(Sender: TObject);
+begin
+  Fizvedi.dodatek ;
+end;
+
+procedure TFzacetek.FormActivate(Sender: TObject);
+begin
+  rrac := true ;
+//  SendMessage(Fzacetek.handle,CM_MOUSEENTER,0,0) ;
+  If paramCount > 0 then    // avtomatièen zagon
+  begin
+   { Prenos := Tprenos.Create( True );
+    prenos.FreeOnTerminate := True;
+    prenos.Priority := tpLower ;
+    prenos.Resume;   }
+    button1.Caption := 'Prekini' ;
+    rrac := false ;
+    FTransfer.Getprenos ;
+   // Application.terminate ;
+  end;
+end;
+
+end.

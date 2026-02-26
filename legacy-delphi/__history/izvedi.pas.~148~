@@ -1,0 +1,2406 @@
+unit izvedi;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Data.DB, Data.Win.ADODB,
+  SAPFunctionsOCX_TLB, Vcl.OleCtrls, SAPLogonCtrl_TLB, PrijavaSAP,deklar,pomoc;
+
+  const
+   SL = '/' ;
+type
+  sams = record
+    iprem : Integer ;
+    ipl : integer ;
+    linija : integer ;
+    mat : string ;
+    mat_pl : string ;
+    naziv : string ;
+    kolic : longint ;
+    pec : longint ;
+    zal : longint ;
+  end;
+  zalsam = record
+    mat : string ;
+    zal : longint ;
+    pec : longint ;
+  end ;
+  prrk = record
+    dt : TdateTime   ;
+    trak : Integer ;
+    izmena : integer ;
+    stev : Integer ;
+  end;
+  prrn = record
+    dt : TdateTime   ;
+    trak : Integer ;
+    izmena : integer ;
+  end;
+  prems = record
+    idp : integer ;
+    kap : integer ;
+    dat : Tdatetime ;
+    izm : integer ;
+  end ;
+  pointt = ^sams ;
+
+  TFizvedi = class(TForm)
+    ADOConnection1: TADOConnection;
+    ADOTable1: TADOTable;
+    AdoQuery2: TADOQuery;
+    SAPLogonControl1: TSAPLogonControl;
+    SAPFunctions1: TSAPFunctions;
+    ADOTable1stev: TWordField;
+    ADOTable1naziv: TStringField;
+    ADOTable1koda: TStringField;
+    ADOTable1kapaciteta: TIntegerField;
+    ADOTable1vsota: TIntegerField;
+    AdoQuery2ident: TAutoIncField;
+    AdoQuery2stev: TWordField;
+    AdoQuery2nalog: TStringField;
+    AdoQuery2koda: TStringField;
+    AdoQuery2kolicina: TIntegerField;
+    AdoQuery2izmena: TWordField;
+    ADOQuery4: TADOQuery;
+    ADOQuery3: TADOQuery;
+    ADOQuery7: TADOQuery;
+    ADOQuery8: TADOQuery;
+    ADOQuery9: TADOQuery;
+    ADOQuery10: TADOQuery;
+    ADOQuery5: TADOQuery;
+    ADOQuery6: TADOQuery;
+    ADOQuery2dan: TDateTimeField;
+    ADOTable2: TADOTable;
+    ADOTable2zapt: TAutoIncField;
+    ADOTable2premer: TStringField;
+    ADOTable2kapaciteta: TIntegerField;
+    ADOTable2vsota: TIntegerField;
+    ADOQuery2danstart: TDateTimeField;
+    procedure FormCreate(Sender: TObject);
+  private
+    traks : TstringList ;
+    procedure ZapisPlo(izap,ist,ikolic : integer; order,mat : string; dstart : TdateTime);
+    procedure ZapisSam(izap,ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec,razlika,razl_pec : integer);
+    procedure ZapisPro(ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+    procedure ZapisSpo(ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+    procedure ZapisUli(izap,ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+    procedure ZapisSpi(izap,ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+  public
+    procedure dodatek ;
+
+  end;
+
+  Tprenos = class(TThread)
+  private
+    connection : variant ;
+    list,clist : Tlist ;
+    zulist,sulist : tlist ;
+    svlist : tlist ;
+    plant : string ;
+    Procedure GetProdList(id : integer; deln : string ; var tab : variant; var vredu : boolean) ;
+    procedure GetProdDetail(deln : string; id : integer; var tabc : variant; var vredu : boolean) ;
+    Procedure GetConfList(order,conf : string; var tabs : variant; var vredu : boolean) ;
+    procedure GetConfDetail(conf,conf_c : string; var yie : longint) ;
+    Function KodaConv(koda : string; cc : char) : string ;
+    procedure Obdelajsamot(nzz,mt,kodpl : string; ix,ln : longint; idc : integer; zlist,slist : Tlist) ;
+    Function Preverisam(mt : string; zlist : Tlist) : boolean;
+    procedure obdelajUli(delns,mt: string; ix,ln : longint; idc,kk : integer) ;
+    Procedure Zapissam(kk,idc,ln : integer ;mt,kodpl,nz : string; ix : longint; var slist: tlist) ;
+    procedure Obdelajprot(nzp,mtp,kodpl : string; ix,ln : longint; idc,kk : integer; zplist,splist : Tlist) ;
+    procedure Obdelajobroc(nzz,mt,kodpl : string; ix,ln : longint; idc : integer; zlist,slist : Tlist) ;
+    Procedure ZapisSk(mt : string; ix,rz : longint; var zlist: tlist) ;
+    procedure ZapisSup(mat: string; ix : longint; slist : tlist) ;
+    Procedure zaloge(opr : integer;slist,zlist : tlist) ;
+    Procedure zaloge_sp(slist,svlist: Tlist) ;
+    Procedure Vsota ;
+    Procedure ListaPrek(var list : Tlist) ;
+    Procedure ListaDod(var clist : Tlist) ;
+    procedure Izmcas(kdp : string; dd : TdateTime; izm : integer) ;
+    Function ZalogeZaMat(koda : string) : longint;
+    Procedure povecaj(var dd : TdateTime; var izm : Integer) ;
+    Function GetNocna(dd : TdateTime; istev : integer; iz : integer) : boolean ;
+    procedure nasled(var dd : TdateTime; var izm : Integer) ;
+    function GetKapObr(ii : integer) : integer;
+    procedure Prijava;
+    procedure Pocisti1(list : Tlist) ;
+    procedure Pocisti2(list : Tlist) ;
+    procedure Pocisti3(list : Tlist) ;
+    procedure Pocisti4(list : Tlist) ;
+    procedure Pocisti5(list : Tlist) ;
+  protected
+    procedure Execute; override;
+
+  public
+   prija : Tprijava ;
+  end;
+
+var
+  Fizvedi: TFizvedi;
+  function CompareSam(pt1,pt2 : pointt) : Integer ;
+implementation
+
+{$R *.dfm}
+
+uses zacetek;
+
+procedure TFizvedi.FormCreate(Sender: TObject);
+   var dr,dr1 : string ;
+       dir : string ;
+begin
+  dir := ExtractFilePath(application.ExeName) + '\Montaz_pl.udl';
+  Adoconnection1.ConnectionString := 'FILE NAME=' + dir ;
+  ADOTable1.Connection := AdoConnection1  ;
+  traks := TstringList.Create ;
+  ADOtable1.Open ;
+  ADOtable1.First ;
+  while not ADOTable1.eof do
+  begin
+     traks.Add(ADOtable1koda.Value) ;
+     ADOtable1.Next ;
+  end;
+  { traks.Add('2107-201') ;
+  traks.Add('2105-201') ;
+  traks.Add('2110-201') ;
+  traks.Add('2115-201') ;
+  traks.Add('2125-201') ;}
+end;
+
+Procedure TFIzvedi.zapisPlo(izap,ist,ikolic : integer; order,mat : string; dstart : TdateTime);
+begin
+  AdoQuery2.Append ;
+  AdoQuery2stev.value := ist ;
+  AdoQuery2nalog.value := order ;
+  AdoQuery2koda.value := mat ;
+  AdoQuery2kolicina.value := ikolic ;
+  Adoquery2danstart.value := dstart ;
+  AdoQuery2.post ;
+end;
+
+procedure TFIzvedi.ZapisSam(izap,ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec,razlika,razl_pec : integer);
+begin
+  AdoQuery4.Append ;
+  adoQuery4.Fieldbyname('zap').value := izap ;
+  adoQuery4.Fieldbyname('linija').value := ilin ;
+  adoQuery4.Fieldbyname('koda').value := koda ;
+  adoQuery4.Fieldbyname('koda_pl').value := koda_pl ;
+  adoQuery4.Fieldbyname('naziv').value := naziv ;
+  adoQuery4.Fieldbyname('kolic').value := kolic ;
+  adoQuery4.Fieldbyname('zaloge').value := zaloge ;
+  adoQuery4.Fieldbyname('pec').value := pec ;
+  adoQuery4.Fieldbyname('razlika').value := razlika ;
+  adoQuery4.Fieldbyname('razl_pec').value := razl_pec ;
+  if koda = 'Vsota' then adoQuery4.Fieldbyname('datum').value := date -1  ;
+
+  AdoQuery4.post
+end;
+
+procedure TFIzvedi.ZapisPro(ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+  var zp : Integer ;
+begin
+  case ilin of
+    1 : zp := 1 ;
+    5 : zp := 2 ;
+    2,3,4 : zp := 3 ;
+  end;
+  if koda_pl = '' then ilin := 0 ;
+
+  AdoQuery7.Append ;
+  adoQuery7.Fieldbyname('linija').value := ilin ;
+  adoQuery7.Fieldbyname('zap').value := zp ;
+  adoQuery7.Fieldbyname('koda').value := koda ;
+  adoQuery7.Fieldbyname('koda_pl').value := koda_pl ;
+  adoQuery7.Fieldbyname('naziv').value := naziv ;
+  adoQuery7.Fieldbyname('kolic').value := kolic ;
+  adoQuery7.Fieldbyname('zaloge').value := zaloge ;
+ // adoQuery7.Fieldbyname('pec').value := pec ;
+  adoQuery7.Fieldbyname('razlika').value := pec ;
+  //adoQuery7.Fieldbyname('razl_pec').value := razl_pec ;
+  if koda = 'Vsota' then adoQuery7.Fieldbyname('dan').value := date - 2  ;
+  AdoQuery7.post
+end;
+
+procedure TFIzvedi.ZapisSpo(ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+begin
+  AdoQuery8.Append ;
+  adoQuery8.Fieldbyname('linija').value := ilin ;
+  adoQuery8.Fieldbyname('koda').value := koda ;
+  adoQuery8.Fieldbyname('koda_pl').value := koda_pl ;
+  adoQuery8.Fieldbyname('naziv').value := naziv ;
+  adoQuery8.Fieldbyname('kolic').value := kolic ;
+  adoQuery8.Fieldbyname('zaloge').value := zaloge ;
+//  adoQuery8.Fieldbyname('pec').value := pec ;
+  adoQuery8.Fieldbyname('razlika').value := pec ;
+ // adoQuery8.Fieldbyname('razl_pec').value := razl_pec ;
+  if koda = 'Vsota' then adoQuery8.Fieldbyname('dan').value := date - 2  ;
+  AdoQuery8.post
+end;
+
+procedure TFIzvedi.ZapisUli(izap,ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+begin
+  AdoQuery9.Append ;
+  adoQuery9.Fieldbyname('zap').value := izap ;
+  adoQuery9.Fieldbyname('linija').value := ilin ;
+  adoQuery9.Fieldbyname('koda').value := koda ;
+  adoQuery9.Fieldbyname('koda_pl').value := koda_pl ;
+  adoQuery9.Fieldbyname('naziv').value := naziv ;
+  adoQuery9.Fieldbyname('kolic').value := kolic ;
+  adoQuery9.Fieldbyname('zaloge').value := zaloge ;
+ // adoQuery9.Fieldbyname('pec').value := pec ;
+  adoQuery9.Fieldbyname('razlika').value := pec ;
+ // adoQuery9.Fieldbyname('razl_pec').value := razl_pec ;
+  if koda = 'Vsota' then adoQuery9.Fieldbyname('dan').value := date - 2  ;
+  AdoQuery9.post
+end;
+
+procedure TFIzvedi.ZapisSpi(izap,ilin : integer; koda,koda_pl,naziv : string; kolic,zaloge,pec : integer);
+begin
+  AdoQuery10.Append ;
+  adoQuery10.Fieldbyname('zap').value := izap ;
+  adoQuery10.Fieldbyname('linija').value := ilin ;
+  adoQuery10.Fieldbyname('koda').value := koda ;
+  adoQuery10.Fieldbyname('koda_pl').value := koda_pl ;
+  adoQuery10.Fieldbyname('naziv').value := naziv ;
+  adoQuery10.Fieldbyname('kolic').value := kolic ;
+  adoQuery10.Fieldbyname('zaloge').value := zaloge ;
+ // adoQuery10.Fieldbyname('pec').value := pec ;
+  adoQuery10.Fieldbyname('razlika').value := pec ;
+ // adoQuery10.Fieldbyname('razl_pec').value := razl_pec ;
+  if koda = 'Vsota' then adoQuery10.Fieldbyname('dan').value := date - 2  ;
+  AdoQuery10.post
+end;
+
+
+Procedure TFIzvedi.dodatek ;
+  var st, ln : integer ;
+      kol,kl : integer ;
+      zp : integer ;
+      zl, zal : integer ;
+      pec,pc : integer  ;
+      raz,rz : integer ;
+      rzp,rp : integer ;
+      ilin : integer ;
+begin
+  adotable1.open ;
+  Adotable1.first ;
+  while not adotable1.eof do
+  begin
+    st := adotable1stev.value ;
+    ADOQuery2.SQL.Clear ;
+    ADOquery2.SQL.add('select * from plosce where stev = :ST') ;
+    ADOquery2.parameters[0].value := st ;
+    ADOquery2.parameters[0].name  := 'ST' ;
+    AdoQuery2.Open;
+    Fizvedi.AdoQuery2.First;
+    kol := 0 ;
+    while not Adoquery2.eof do
+    begin
+      kl := Adoquery2kolicina.value ;
+      kol := kol + kl ;
+      adoquery2.Next ;
+    end;
+    zapisPlo(0,st,kol,'Vsota','',date-5) ;
+    Adotable1.next ;
+  end;
+  Adotable1.Close ;
+  Adoquery2.close ;
+
+  Adoquery3.SQL.Clear ;
+  Adoquery3.SQL.Add('SELECT * FROM premerSam') ;
+  adoquery3.open ;
+  Adoquery3.First ;
+  while not Adoquery3.Eof do
+  begin
+    zp :=  adoQuery3.Fieldbyname('zap').value ;
+    ADOQuery4.SQL.Clear ;
+    ADOquery4.SQL.add('select * from samoti where zap = :ZP') ;
+    ADOquery4.parameters[0].value := zp ;
+    ADOquery4.parameters[0].name  := 'ZP' ;
+    AdoQuery4.Open;
+    kol := 0 ;
+    zal := 0 ;
+    pec := 0 ;
+    raz := 0 ;
+    rzp := 0 ;
+    adoquery4.First ;
+    while not Adoquery4.eof do
+    begin
+      kl := Adoquery4.FieldByName('kolic').value ;
+      zl := Adoquery4.FieldByName('zaloge').value ;
+      pc := Adoquery4.FieldByName('pec').value ;
+      rz := Adoquery4.FieldByName('razlika').value ;
+      rp := Adoquery4.FieldByName('razl_pec').value ;
+      kol := kol + kl ;
+      zal := zal + zl ;
+      pec := + pec + pc ;
+      raz := raz + rz ;
+      rzp := rzp + rp ;
+      adoquery4.Next ;
+    end;
+    Fizvedi.ZapisSam(zp,0,'Vsota','','',kol,zal,pec,raz,rzp) ;
+    Adoquery3.Next ;
+  end;
+  adoquery3.Close ;
+  Adoquery4.Close ;
+
+  for st := 1 to 3 do
+  begin
+    ADOQuery7.SQL.Clear ;
+    ADOquery7.SQL.add('select * from protekt where zap = :ZP') ;
+    ADOquery7.parameters[0].value := st ;
+    ADOquery7.parameters[0].name  := 'ZP' ;
+    AdoQuery7.Open;
+    ilin :=  Adoquery7.FieldByName('linija').value ;
+    kol := 0 ;
+    zal := 0 ;
+    raz := 0 ;
+    adoquery7.First ;
+    while not Adoquery7.eof do
+    begin
+      kl := Adoquery7.FieldByName('kolic').value ;
+      zl := Adoquery7.FieldByName('zaloge').value ;
+      rz := Adoquery7.FieldByName('razlika').value ;
+      kol := kol + kl ;
+      zal := zal + zl ;
+      raz := raz + rz ;
+      adoquery7.Next ;
+    end;
+    Fizvedi.ZapisPro(ilin,'Vsota','','',kol,zal,raz) ;
+  end;
+  adoquery7.Close ;
+
+
+  Adoquery8.SQL.Clear ;
+  Adoquery8.SQL.Add('select * from sponke')  ;
+  Adoquery8.Open ;
+  Adoquery8.First ;
+  kol := 0 ;
+  zal := 0 ;
+  raz := 0 ;
+  while not Adoquery8.eof do
+  begin
+
+    kl := Adoquery8.FieldByName('kolic').value ;
+    zl := Adoquery8.FieldByName('zaloge').value ;
+    rz := Adoquery8.FieldByName('razlika').value ;
+    kol := kol + kl ;
+    zal := zal + zl ;
+    raz := raz + rz ;
+    adoquery8.Next ;
+  end;
+  Fizvedi.ZapisSpo(0,'Vsota','','',kol,zal,raz) ;
+  adoquery8.Close ;
+
+
+  for st := 1 to 4 do
+  begin
+    ADOQuery9.SQL.Clear ;
+    ADOquery9.SQL.add('select * from ulitki where zap = :ZP') ;
+    ADOquery9.parameters[0].value := st ;
+    ADOquery9.parameters[0].name  := 'ZP' ;
+    AdoQuery9.Open;
+    ilin :=  Adoquery9.FieldByName('linija').value ;
+    kol := 0 ;
+    zal := 0 ;
+    raz := 0 ;
+    adoquery9.First ;
+    while not Adoquery9.eof do
+    begin
+      kl := Adoquery9.FieldByName('kolic').value ;
+      zl := Adoquery9.FieldByName('zaloge').value ;
+      rz := Adoquery9.FieldByName('razlika').value ;
+      kol := kol + kl ;
+      zal := zal + zl ;
+      raz := raz + rz ;
+      adoquery9.Next ;
+    end;
+    Fizvedi.ZapisUli(st,0,'Vsota','','',kol,zal,raz) ;
+  end;
+  adoquery9.Close ;
+
+  for st := 1 to 8 do
+  begin
+    ADOQuery10.SQL.Clear ;
+    ADOquery10.SQL.add('select * from obroci where zap = :ZP') ;
+    ADOquery10.parameters[0].value := st ;
+    ADOquery10.parameters[0].name  := 'ZP' ;
+    AdoQuery10.Open;
+    ilin :=  Adoquery10.FieldByName('linija').value ;
+    kol := 0 ;
+    zal := 0 ;
+    raz := 0 ;
+    adoquery10.First ;
+    while not Adoquery10.eof do
+    begin
+      kl := Adoquery10.FieldByName('kolic').value ;
+      zl := Adoquery10.FieldByName('zaloge').value ;
+      rz := Adoquery10.FieldByName('razlika').value ;
+      kol := kol + kl ;
+      zal := zal + zl ;
+      raz := raz + rz ;
+      adoquery10.Next ;
+    end;
+    Fizvedi.ZapisSpi(st,0,'Vsota','','',kol,zal,raz) ;
+  end;
+  adoquery10.Close ;
+  sleep(100) ;
+
+  for st := 1 to 4 do
+  begin
+    ADOQuery10.SQL.Clear ;
+    ADOquery10.SQL.add('select * from spirale where zap = :ZP') ;
+    ADOquery10.parameters[0].value := st ;
+    ADOquery10.parameters[0].name  := 'ZP' ;
+    AdoQuery10.Open;
+    ilin :=  Adoquery10.FieldByName('linija').value ;
+    kol := 0 ;
+    zal := 0 ;
+    raz := 0 ;
+    adoquery10.First ;
+    while not Adoquery10.eof do
+    begin
+      kl := Adoquery10.FieldByName('kolic').value ;
+      zl := Adoquery10.FieldByName('zaloge').value ;
+      rz := Adoquery10.FieldByName('razlika').value ;
+      kol := kol + kl ;
+      zal := zal + zl ;
+      raz := raz + rz ;
+      adoquery10.Next ;
+    end;
+    Fizvedi.ZapisSpi(st,0,'Vsota','','',kol,zal,raz) ;
+  end;
+  adoquery10.Close ;
+
+  //ShowMessage('Konèal sem') ;
+end;
+
+Procedure Tprenos.execute ;
+ var deln,sx, statdn,kdd : string ;
+     order,pkod,conf,conf_c,mat,dm : string ;
+     dn,kodpl,nzp,nzs,mt,nzz,mtp,mts,dir,mto,nzo,pzz : string ;
+     vredu,bkod : boolean ;
+     tab,tabc,tabs : variant ;
+     ist,kk,izap,i,j,m,mm,ni : Integer ;
+     ikolic,potr,yie,yield : Integer ;
+     mk,ln,idc,ix,ii,kks : integer ;
+     slist,zlist,splist,zplist,sslist,zslist,solist,zolist : Tlist ;
+     ff : textfile ;
+     tt : longint ;
+     dstart : TdateTime ;
+     izvedba : boolean ;
+begin
+  fizvedi.AdoQuery2.Connection := fIzvedi.AdoConnection1  ;
+  try
+    Fizvedi.ADOQuery2.SQL.Clear ;
+    Fizvedi.ADOquery2.SQL.add('select * from plosce') ;
+    Fizvedi.AdoQuery2.Open;
+    Fizvedi.AdoQuery2.first;
+    deln := Fizvedi.AdoQuery2nalog.value ;
+    Fizvedi.AdoQuery2.Close ;
+  except
+     deln := '000004283286' ;
+  end;
+  deln := '000005223286' ;
+  Fzacetek.label2.Caption := 'Zaèetni delovni nalog ' + deln ;
+
+  tt := GetTickCount ;
+  Screen.Cursor := crHourGlass ;
+
+
+  //Fizvedi.AdoQuery2.delete ;
+  izvedba := false ;
+  Prijava ;
+  if Connection.LogOn(0,true) = true then  (* parameter "true" = SilentLogOn *)
+  begin
+    izvedba := true ;
+    Fizvedi.ADOQuery2.SQL.Clear ;
+    Fizvedi.ADOquery2.SQL.add('delete from plosce') ;
+    Fizvedi.ADOquery2.execSQL ;
+    sleep(500) ;
+
+    Fizvedi.ADOQuery2.SQL.Clear ;
+    Fizvedi.ADOquery2.SQL.add('select * from plosce') ;
+    Fizvedi.AdoQuery2.Open;
+
+        // preberem listo delovnih nalogov za plošèe
+    GetProdList(1,deln,tab,vredu ) ;
+    if not vredu then
+    begin
+       showMessage('Napaka bri branju proizvidnjih nalogov') ;
+       exit
+    end ;
+
+    kk := Tab.rowCount ;
+    sx := 'Prenos plošè ' ;
+    Fzacetek.Progressbar1.Min := 0 ;
+    Fzacetek.Progressbar1.Max := kk ;
+    Fzacetek.ProgressBar1.Position := 0;
+    Fzacetek.ProgressBar1.Step := 1;
+    Fzacetek.label1.Caption := sx + '1/'+IntTostr(kk) ;
+    Fzacetek.label1.Update ;
+
+    izap := 1 ;
+
+    for i := 1 to kk do           // po vseh delovnih nalogin za plošèe
+    begin
+       if terminated then exit  ;
+
+       Fzacetek.ProgressBar1.StepIt;
+       Fzacetek.label1.Caption := sx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(kk) ;
+       Fzacetek.label1.Update ;
+
+       // tehnièno zakljuèene izloèim
+       statdn := copy(tab.value(i,42),1,4) ;
+       if (statdn = 'TEHZ') or (statdn = 'ZAKL') then continue ;
+
+       // izloèim naloge ki ne pripadajo plošèam
+       kdd := tab.value(i,5) ;
+       if (kdd[9] <> '4') and (kdd[9] <> '3') and (kdd[9] <> '2') then continue ;
+
+       // preberem( podatke iz delovnega naloga
+       GetProdDetail(tab.value(i,1),4,tabc,vredu) ;
+       if not vredu then
+       begin
+         showMessage('Napaka bri branju enega proizvodnjega naloga') ;
+         exit
+       end ;
+
+       ikolic := 0 ;
+       potr :=  Round(Tab.value(i,18)) ;
+       order := Tab.value(i,1) ;
+       dstart := Tab.value(i,14) ;
+      // Showmessage(IntTostr(i) + '/' + IntTostr(tabc.rowcount)) ;
+       for j := 1 to tabc.rowCount do        // po vseh operacijah
+       begin
+          pkod := tabc.value[j,12] ;
+          bkod := (pkod = 'PP04') or (pkod = 'PP14') or (pkod = 'PP02') or (pkod = 'PP10') ;
+          if bkod and (tabc.value[j,25] > 0) and (tabc.value[j,11] = '0010') then
+          begin
+            conf := Tabc.value(j,4) ;
+            // tt := GetTickCount ;
+            // za vsako operacijo preberem potrditve
+            GetConfList(order,conf,tabs,vredu) ;
+            if not vredu then
+            begin
+              showMessage('Napaka bri branju list potrditev') ;
+              exit
+            end ;
+
+            // raèunanje donosa
+            yield := 0 ;
+            mm := tabs.rowcount ;
+            for m := 1 to mm do
+            begin
+               conf_c := tabs.value(m,2) ;
+               //tt := GettickCount ;
+               GetConfDetail(conf,conf_c,yie) ;
+               yield := yield + yie;
+            end;
+
+            ikolic := potr-yield ;
+            if ikolic > 0 then
+            begin
+              dm := Tabc.value(j,43) ;
+              ist := Fizvedi.Traks.IndexOf(dm) +1 ;
+             // mat := KodaConv(tab.value(i,5),'O') ;
+              mat := KodaForm(tab.value(i,5),SL,false) ;
+              Fizvedi.ZapisPlo(izap,ist,ikolic,order,mat,dstart);
+              Inc(izap) ;
+           end;
+         end;
+       end;
+     for j := 1 to tabc.rowCount do tabc.DeleteRow ;
+    end ;      // konec pregled pa vseh nalogih
+  end ;
+  Fizvedi.AdoQuery2.Close ;
+  Fizvedi.traks.free ;
+  slist := Tlist.create    ;
+  zlist := Tlist.create    ;
+  splist := Tlist.create    ;
+  zplist := Tlist.create    ;
+  sslist := Tlist.create    ;
+  zslist := Tlist.create    ;
+  sulist := Tlist.create    ;
+  zulist := Tlist.create    ;
+  svlist := Tlist.create    ;
+  zolist := Tlist.create    ;
+  solist := Tlist.create    ;
+  //zvlist := Tlist.create    ;
+  Prijava ;
+  Fizvedi.ADOtable1.Open ;
+  Fizvedi.ADOQuery2.Open ;
+
+  if Connection.LogOn(0,true) = true then  (* parameter "true" = SilentLogOn *)
+  begin
+     ni := Fizvedi.ADOQuery2.RecordCount ;
+     sx := 'Prenos šamotov ' ;
+     Fzacetek.Progressbar1.BarColor := clBlue ;
+     Fzacetek.Progressbar1.Min := 0 ;
+     Fzacetek.Progressbar1.Max := ni ;
+     Fzacetek.ProgressBar1.Position := 0;
+     Fzacetek.ProgressBar1.Step := 1;
+     Fzacetek.ProgressBar1.Update ;
+     Fzacetek.label1.Caption := sx + '1/'+IntTostr(ni) ;
+     Fzacetek.label1.Update ;
+     Fizvedi.ADOQuery2.First ;
+     //tt := GetTickCount ;
+     while not Fizvedi.ADOQuery2.Eof  do      // po vseh delovnih nalogih za plošèe
+     begin
+         if terminated then exit  ;
+
+         mk := 0 ;
+
+         Fzacetek.ProgressBar1.StepIt;
+         Fzacetek.ProgressBar1.Update;
+         Fzacetek.label1.Caption := sx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(ni) ;
+         Fzacetek.label1.Update ;
+
+         // preberem podatke za en delovni nalog
+         ln := Fizvedi.ADOQuery2stev.Value ;
+         dn := Fizvedi.ADOQuery2nalog.Value ;
+         kodpl := Fizvedi.ADOQuery2koda.Value ;
+         idc := Fizvedi.ADOQuery2ident.Value ;
+         ix := round(Fizvedi.ADOQuery2kolicina.Value);
+
+         GetProdDetail(dn,5,tabc,vredu) ;     // branje komponent
+         if not vredu then
+         begin
+           showMessage('Napaka bri branju enega proizvodnjega naloga') ;
+           exit
+         end ;
+
+         ii := 1 ;
+
+
+         nzp := '' ;
+         nzs := '' ;
+         for ii := 1 to tabc.rowcount do
+         begin
+           pzz := tabc.value(ii,28) ;
+           if pos('amot',pzz) > 0 then
+           begin
+             mt := tabc.value(ii,5) ;
+             nzz := pzz;
+           end;
+
+           if pos('PROTEKTOR',pzz) > 0 then
+           begin
+             mtp := tabc.value(ii,5) ;
+             nzp := pzz;
+           end;
+
+           if pos('SPONKA',pzz) > 0 then
+           begin
+             mts := tabc.value(ii,5) ;
+             nzs := pzz;
+           end;
+
+           if (pos('OBRO',pzz) > 0) and (pos('PAKIRNI',pzz) = 0) and (length(trim(pzz)) < 12) then
+           begin
+             mto := tabc.value(ii,5) ;
+             nzo := pzz;
+           end;
+         end;
+         for ii := 1 to tabc.rowCount do tabc.DeleteRow ;
+         kks := 1 ;
+       //  tt := GettickCount ;
+         Obdelajsamot(nzz,mt,kodpl,ix,ln,idc,zlist,slist) ;
+        // showmessage(intTostr(Gettickcount -tt)) ;
+         if nzp <> '' then Obdelajprot(nzp,mtp,kodpl,ix,ln,idc,kks,zplist,splist) ;
+         if nzs <> '' then Obdelajprot(nzs,mts,kodpl,ix,ln,idc,kks,zslist,sslist) ;
+         if nzo <> '' then ObdelajObroc(nzo,mto,kodpl,ix,ln,idc,zolist,solist) ;
+
+         Fizvedi.ADOQuery2.Next ;
+     end;  // konec pregled delovnih nalogov
+
+     slist.Sort(@comparesam);
+     Zaloge(1,slist,zlist) ;        // šamoti
+     //zlist.Free ;
+     pocisti1(zlist) ;
+
+     Zaloge(2,splist,zplist) ;        // protektor
+     //splist.Free ;
+    // zplist.Free ;
+     pocisti1(zplist) ;
+     pocisti2(splist) ;
+
+     Zaloge(3,sslist,zslist) ;        // sponke
+    // sslist.Free ;
+    // zslist.Free ;
+     pocisti1(zslist) ;
+     pocisti2(sslist) ;
+
+     Zaloge(4,sulist,zulist) ;          // ulitki
+     pocisti1(zulist) ;
+     pocisti2(sulist) ;
+
+     Zaloge(6,solist,zolist) ;          // obroèi
+     pocisti1(zolist) ;
+     pocisti2(solist) ;
+
+
+    // ShowMessage(IntTostr(zvlist.Count)) ;
+    // ShowMessage(IntTostr(svlist.Count)) ;
+    // Zaloge(5,svlist,zvlist) ;           // špirale
+     zaloge_sp(slist,svlist) ;
+    // svlist.Free ;
+     //zvlist.Free ;
+     //slist.Free ;
+     pocisti2(svlist) ;
+     pocisti2(slist) ;
+   end;
+   vsota ;
+   Fizvedi.sapFunctions1.RemoveAll ;
+  dir := ExtractFilePath(application.exename) ;
+  assignFile(ff,dir + 'zadnidat.txt') ;
+  rewrite(ff) ;
+  writeln(ff,dateTimeTostr(now)) ;
+  CloseFile(ff) ;
+  if izvedba then Fizvedi.dodatek ;
+  Fzacetek.label1.Caption := 'Prenos je konèan ' + inttoStr(gettickCount-tt) ;
+  Fzacetek.Progressbar1.Visible := false ;
+  //Connection.Logoff ;
+  Screen.Cursor := crDefault ;
+end;
+
+// procedura za branje delovnih nalogov
+Procedure Tprenos.GetProdList(id : integer; deln : string ; var tab : variant; var vredu : boolean) ;
+  var funct : variant ;
+begin
+    Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+    funct := Fizvedi.sapFunctions1.add('BAPI_PRODORD_GET_LIST');
+
+    funct.TABLES.item('PRODPLANT_RANGE').appendRow.Value('SIGN') := 'I' ;
+    funct.TABLES.item('PRODPLANT_RANGE').Value(1,2) := 'EQ' ;
+    funct.TABLES.item('PRODPLANT_RANGE').Value(1,3) := plant ;
+
+
+    funct.TABLES.item('PROD_SCHED_RANGE').appendRow.Value('SIGN') := 'I' ;
+    funct.TABLES.item('PROD_SCHED_RANGE').Value(1,2) := 'EQ' ;
+    funct.TABLES.item('PROD_SCHED_RANGE').Value(1,3) := '200' ;
+
+    if id = 1  then        // delovni nalogi za plošèe
+    begin
+      funct.TABLES.item('ORDER_NUMBER_RANGE').appendRow.Value('SIGN') := 'I' ;
+      funct.TABLES.item('ORDER_NUMBER_RANGE').Value(1,2) := 'GE' ;
+      funct.TABLES.item('ORDER_NUMBER_RANGE').Value(1,3) := deln ;
+
+      // s to omejitvijo definiram plošèe
+      funct.TABLES.item('MATERIAL_RANGE').appendRow.Value('SIGN') := 'I' ;
+      funct.TABLES.item('MATERIAL_RANGE').Value(1,2) := 'EQ' ;
+      funct.TABLES.item('MATERIAL_RANGE').Value(1,3) := '000012080000000000' ;
+     // funct.TABLES.item('MATERIAL_RANGE').Value(1,4) := '000013789000000000' ;
+      funct.TABLES.item('MATERIAL_RANGE').Value(1,4) := '000019789000000000' ;
+    end ;
+    if id = 2  then            // delovni nalogi za šamote in sponke
+    begin
+      funct.TABLES.item('MATERIAL_RANGE').appendRow.Value('SIGN') := 'I' ;
+      funct.TABLES.item('MATERIAL_RANGE').Value(1,2) := 'EQ' ;
+      funct.TABLES.item('MATERIAL_RANGE').Value(1,3) := deln ;
+    end ;
+
+    vredu := true ;
+    if not funct.call then           // èe ni bilo v redu
+       vredu := false
+    else
+       tab := funct.TABLES.item('ORDER_HEADER');    // tabela nalogov
+end ;
+
+// procedeura za branje podatkov o enem delovnem nalogu
+procedure Tprenos.GetProdDetail(deln : string; id : integer; var tabc : variant; var vredu : boolean) ;
+  var funct1 : variant ;
+      j : integer ;
+      op : string ;
+begin
+   if id = 4 then op := 'OPERATION' else op := 'COMPONENT' ;
+
+   Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+   funct1 := Fizvedi.sapFunctions1.add('BAPI_PRODORD_GET_DETAIL');
+   funct1.exports('NUMBER').value := deln ;
+   funct1.exports('ORDER_OBJECTS').value(id) := 'X' ;
+   vredu := true ;
+   if not funct1.call then           // èe ni bilo v redu
+     vredu := false
+   else
+     tabc := funct1.TABLES.item(op);
+end ;
+
+// procedure za branje liste potrditev
+Procedure Tprenos.GetConfList(order,conf : string; var tabs : variant; var vredu : boolean) ;
+  var funct3 : variant ;
+begin
+   Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+   Funct3 := Fizvedi.SAPFunctions1.add('BAPI_PRODORDCONF_GETLIST');
+   funct3.TABLES.item('ORDER_RANGE').appendRow.Value('SIGN') := 'I' ;
+   funct3.TABLES.item('ORDER_RANGE').Value(1,2) := 'EQ' ;
+   funct3.TABLES.item('ORDER_RANGE').Value(1,3) := order ;
+   funct3.TABLES.item('CONF_RANGE').appendRow.Value('SIGN') := 'I' ;
+   funct3.TABLES.item('CONF_RANGE').Value(1,2) := 'EQ' ;
+   funct3.TABLES.item('CONF_RANGE').Value(1,3) := conf ;
+   vredu := true ;
+   if not funct3.call then           // èe ni bilo v redu
+     vredu := false
+   else
+     tabs := funct3.TABLES.item('CONFIRMATIONS');
+end;
+
+// procedura za branje podatkov o eni potrditvi
+procedure Tprenos.GetConfDetail(conf,conf_c : string; var yie : longint) ;
+  var funct4 : variant ;
+begin
+   Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+   Funct4 := Fizvedi.SAPFunctions1.add('BAPI_PRODORDCONF_GETDETAIL');
+   Funct4.exports('CONFIRMATION').value := conf ;
+   funct4.exports('CONFIRMATIONCOUNTER').value := conf_c;
+   Funct4.call ;
+   yie := funct4.imports('CONF_DETAIL').value(31) ;
+end;
+
+// pretvorba kode materiala
+Function Tprenos.KodaConv(koda : string; cc : char) : string ;
+  var funct2 : variant ;
+begin
+   Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+   Funct2 := Fizvedi.SAPFunctions1.add('ZRFC_CONV_MATNR_GET');
+   Funct2.exports('RFC_INPUT').value := koda ;
+   funct2.exports('RFC_IO_KENNZ').value := cc ;
+   Funct2.call ;
+   result := funct2.imports('RFC_OUTPUT').value ;
+end;
+
+procedure Tprenos.Obdelajsamot(nzz,mt,kodpl : string; ix,ln : longint; idc : integer; zlist,slist : Tlist) ;
+  var nz,statdn,delns,mat : string ;
+      kk,k1,k2,m,i : Integer ;
+      bsam,vredu : boolean ;
+      taba,funct,tabs : variant ;
+      yi1,yi2,yie,rz,tt : longint ;
+      fdate : Tdatetime ;
+      st_potr,arbid : string;
+begin
+   nz := StringReplace(nzz,'Plo##a #amot','Plošèa šamot',[]) ;
+   kk := 4 ;
+   if pos('šamot 220',nz) > 0 then kk := 1  ;
+   if pos('šamot 180',nz) > 0 then kk := 2  ;
+   if pos('šamot 145',nz) > 0 then kk := 3  ;
+   if pos('šamot 80',nz) > 0 then kk := 4   ;
+   if pos('šamot 110',nz) > 0 then kk := 4  ;
+   if pos('šamot 115',nz) > 0 then kk := 4  ;
+
+  // mat := KodaConv(mt,'O') ;
+   mat := KodaForm(mt,SL,false) ;
+   // poišèem delovne naloge šamotov
+   Fizvedi.sapFunctions1.RemoveAll ;
+   bsam := preveriSam(mt,zlist) ;
+   // èe šamot še ni bil obdelan
+   if bsam then
+   begin
+      tt := GettickCount ;
+      GetProdList(2,mt,taba,vredu) ;   // lista delovnih nalogov za šamot
+     // showmessage(intTostr(Gettickcount -tt)) ;
+      if not vredu then
+      begin
+        showMessage('Napaka bri branju proizvidnjih nalogov') ;
+        exit
+      end ;
+
+      k1 := Taba.rowCount ;
+      yi1 := 0 ;
+      yi2 := 0 ;
+      for i := 1 to k1 do       // po vseh nalogih za doloèen šamot
+      begin
+         delns := taba.value(i,1) ;
+
+
+         try
+            fdate := StrTodate(taba.value(i,10)) ;
+         except
+            fdate := date - 20
+         end;
+
+
+         // omejim se na tiste naloge ki niso starejši kot 20 dni
+        // if fdate < date-20  then continue ;
+
+         // izloèim še zakljuèene
+         try
+           statdn := copy(taba.value(i,42),1,4) ;
+         except
+           statdn := 'TEHZ'
+         end;
+
+         tt := gettickCount ;
+         if i = k1 then obdelajUli(delns,mat,ix,ln,idc,kk) ;
+       //  showmessage('a'+intTostr(Gettickcount -tt)) ;
+
+         if statdn = 'TEHZ' then continue ;
+
+         // preberem potrditve za doloèen nalog
+
+         Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+         funct := Fizvedi.sapFunctions1.add('ZETA_RFC_READ_AFRU');
+         Funct.EXPORTS('dday').VALUE := fdate ;
+         Funct.EXPORTS('stnal').VALUE := delns;
+         funct.call ;           // èe ni bilo v redu
+
+         // raèunam donose na dveh razliènih operacijah
+         tabs := funct.TABLES.item('IT_AFRU');    // tabela rezultatov
+         k2 := Tabs.rowCount ;
+         for m := 1 to k2 do
+         begin
+            arbid := Tabs.value(m,9) ;
+            st_potr := tabs.value(m,2) ;
+            if (arbid >= '10004712') and (arbid <= '10004720')  then
+            begin
+               yie :=  Tabs.value(m,38);
+               if Tabs.value(m,95) = 'X' then yie := -yie ;
+               if (arbid >= '10004712') and (arbid <= '10004718')  then yi1 := yi1 + yie;
+               if (arbid = '10004720') or (arbid = '10004719') then yi2 := yi2 + yie;
+            end;
+         end ;
+        // obdelajUli(delns,mat,ix,ln,idc) ;
+       end;   // konec pregled nalogov šamotov
+       rz := yi1 - yi2 ;      // razlika donosov dveh operacijah
+       //  mat := KodaConv(mt,'O') ;
+       ZapisSk(mat,ix,rz,zlist) ;
+    end else ZapisSup(mat,ix,sulist) ;
+
+  //  mat := KodaConv(mt,'O') ;
+    ZapisSam(kk,idc,ln,mat,kodpl,nz,ix,slist) ;
+end ;
+
+//***************************************
+procedure Tprenos.Obdelajobroc(nzz,mt,kodpl : string; ix,ln : longint; idc : integer; zlist,slist : Tlist) ;
+  var statdn,delns,mat : string ;
+      kk,k1,k2,m,i : Integer ;
+      bsam,vredu : boolean ;
+      taba,funct,tabs : variant ;
+      yi1,yi2,yie,rz,tt : longint ;
+      fdate : Tdatetime ;
+      st_potr,arbid : string;
+begin
+   nzz[5] := 'È' ;
+   kk := 4 ;
+   if pos('OBROÈ 220',nzz) > 0 then kk := 1  ;
+   if pos('OBROÈ 180',nzz) > 0 then kk := 2  ;
+   if pos('OBROÈ 145',nzz) > 0 then kk := 3  ;
+   if pos('OBROÈ 80',nzz) > 0 then kk := 4   ;
+   if pos('OBROÈ 110',nzz) > 0 then kk := 4  ;
+   if pos('OBROÈ 115',nzz) > 0 then kk := 4  ;
+   if pos('-4',nzz)  > 0 then kk := 4 + kk ;
+
+
+   //mat := KodaConv(mt,'O') ;
+   mat := KodaForm(mt,SL,false) ;
+   // poišèem delovne naloge šamotov
+   Fizvedi.sapFunctions1.RemoveAll ;
+   bsam := preveriSam(mt,zlist) ;
+   // èe obroè še ni bil obdelan
+   if bsam then
+   begin
+      tt := GettickCount ;
+      GetProdList(2,mt,taba,vredu) ;   // lista delovnih nalogov za obroèe
+     // showmessage(intTostr(Gettickcount -tt)) ;
+      if not vredu then
+      begin
+        showMessage('Napaka bri branju proizvidnjih nalogov') ;
+        exit
+      end ;
+
+      k1 := Taba.rowCount ;
+      yi1 := 0 ;
+      yi2 := 0 ;
+      for i := 1 to k1 do       // po vseh nalogih za doloèen obroè
+      begin
+         delns := taba.value(i,1) ;
+
+
+         try
+            fdate := StrTodate(taba.value(i,10)) ;
+         except
+            fdate := date - 20
+         end;
+
+         // izloèim še zakljuèene
+         try
+           statdn := copy(taba.value(i,42),1,4) ;
+         except
+           statdn := 'TEHZ'
+         end;
+
+         if statdn = 'TEHZ' then continue ;
+
+         // preberem potrditve za doloèen nalog
+
+         Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+         funct := Fizvedi.sapFunctions1.add('ZETA_RFC_READ_AFRU');
+         Funct.EXPORTS('dday').VALUE := fdate ;
+         Funct.EXPORTS('stnal').VALUE := delns;
+         funct.call ;           // èe ni bilo v redu
+
+         // raèunam donose na dveh razliènih operacijah
+         tabs := funct.TABLES.item('IT_AFRU');    // tabela rezultatov
+         k2 := Tabs.rowCount ;
+         yie := 0 ;
+         for m := 1 to k2 do
+         begin
+            yie := yie + Tabs.value(m,38);
+         end ;
+
+       end;   // konec pregled nalogov šamotov
+       rz := yi1 - yi2 ;      // razlika donosov dveh operacijah
+       //  mat := KodaConv(mt,'O') ;
+       ZapisSk(mat,ix,rz,zlist) ;
+    end else ZapisSup(mat,ix,sulist) ;
+
+  //  mat := KodaConv(mt,'O') ;
+    ZapisSam(kk,idc,ln,mat,kodpl,nzz,ix,slist) ;
+end ;
+//******************************************
+
+
+
+
+
+
+// preverim èe je koda (šamota) že v listi
+Function Tprenos.Preverisam(mt : string; zlist : Tlist) : boolean;
+  var i : integer ;
+      bs : boolean ;
+      pp : ^zalsam ;
+      mat : string ;
+begin
+  bs := true ;
+ // mat := KodaConv(mt,'O') ;
+  mat := KodaForm(mt,SL,false) ;
+  for i := 0 to zlist.count-1 do
+  begin
+     pp := zlist[i] ;
+     if pp^.mat = mat then
+     begin
+       bs := false ;
+       break
+     end ;
+  end;
+  result := bs ;
+end;
+
+procedure Tprenos.obdelajUli(delns,mt: string; ix,ln : longint; idc,kk : integer) ;
+  var vredu,ns : boolean ;
+      tabc : variant ;
+      ii,jj : integer ;
+      mtu, nzu,mat,mtv,nzv : string ;
+      ps : ^sams ;
+      tt : longint ;
+
+begin
+  tt := GettickCount ;
+  GetProdDetail(delns,5,tabc,vredu) ;
+ // showmessage('a'+intTostr(Gettickcount -tt)) ;
+  if not vredu then
+  begin
+     showMessage('Napaka bri branju enega proizvodnjega naloga za šamot') ;
+     exit
+  end ;
+  nzu := '' ;
+  for ii := 1 to tabc.rowcount do
+  begin
+    if pos('ULITEK',tabc.value(ii,28)) > 0 then
+    begin
+      mtu := tabc.value(ii,5) ;
+      nzu := tabc.value(ii,28);
+     // Obdelajprot(nzu,mtu,mt,ix,ln,idc,kk,zulist,sulist)
+    end;
+    if pos('SPIRALA',tabc.value(ii,28)) > 0 then
+    begin
+      mtv := tabc.value(ii,5) ;
+      nzv := tabc.value(ii,28);
+      // mat := KodaConv(mtu,'O') ;
+      ZapisSam(kk,idc,ln,mtv,mt,nzv,ix,svlist) ;
+    end;
+  end;
+  tt := GettickCount ;
+  if nzu <> '' then Obdelajprot(nzu,mtu,mt,ix,ln,idc,kk,zulist,sulist) ;
+ // if ikk = 1 then Obdelajprot(nzu,mtu,mt,ix,ln,idc,kk,zulist,sulist) ;
+ // showmessage('b'+intTostr(Gettickcount -tt)) ;
+end;
+
+Procedure Tprenos.Zapissam(kk,idc,ln : integer ;mt,kodpl,nz : string; ix : longint; var slist: tlist) ;
+  var ii : integer ;
+      nas : boolean ;
+      pp : ^sams ;
+begin
+  nas := false ;
+  for ii  := 0 to slist.count-1 do
+  begin
+    pp := slist[ii] ;
+    if (pp.mat = mt) and (pp.mat_pl = kodpl) then
+    begin
+      nas := true ;
+      pp^.kolic := pp^.kolic + ix ;
+      break
+    end;
+  end;
+  if not nas then
+  begin
+    new(pp) ;
+    pp^.iprem := kk ;
+    pp^.ipl := idc ;
+    pp^.linija := ln ;
+    pp^.mat := mt ;
+    pp^.mat_pl := kodpl ;
+    pp^.naziv := nz ;
+    pp^.kolic := ix ;
+    pp^.pec := 0 ;
+  //  pp^.razl := rz ;
+    slist.add(pp)
+  end;
+end;
+
+procedure Tprenos.Obdelajprot(nzp,mtp,kodpl : string; ix,ln : longint; idc,kk : integer; zplist,splist : Tlist) ;
+  var nz,statdn,delns,mat : string ;
+      k1,k2,m,i : Integer ;
+      bsam,vredu : boolean ;
+      taba,funct,tabs : variant ;
+      yi1,yi2,yie,rz : longint ;
+      fdate : Tdatetime ;
+      st_potr,arbid : string;
+begin
+   Fizvedi.sapFunctions1.RemoveAll ;
+   bsam := preveriSam(mtp,zplist) ;
+   // èe protektor še ni bil obdelan
+   if bsam then
+   begin
+      GetProdList(2,mtp,taba,vredu) ;   //lista delovnih nalogov za protektor
+
+      if not vredu then
+      begin
+        showMessage('Napaka bri branju proizvidnjih nalogov') ;
+        exit
+      end ;
+
+      k1 := Taba.rowCount ;
+      yi1 := 0 ;
+      yi2 := 0 ;
+      for i := 1 to k1 do       // po vseh nalogih za doloèen šamot
+      begin
+         try
+            fdate := StrTodate(taba.value(i,10)) ;
+         except
+            fdate := date - 20
+         end;
+             // omejim se na tiste naloge ki niso starejši kot 20 dni
+             if fdate < date-20  then continue ;
+
+             // izloèim še zakljuèene
+         statdn := copy(taba.value(i,42),1,4) ;
+         if statdn = 'TEHZ' then continue ;
+
+         // preberem potrditve za doloèen nalog
+         delns := taba.value(i,1) ;
+         Fizvedi.SAPFunctions1.Connection := Idispatch(Connection);
+         funct := Fizvedi.sapFunctions1.add('ZETA_RFC_READ_AFRU');
+         Funct.EXPORTS('dday').VALUE := fdate ;
+         Funct.EXPORTS('stnal').VALUE := delns;
+         funct.call ;           // èe ni bilo v redu
+
+         // raèunam donose na dveh razliènih operacijah
+         tabs := funct.TABLES.item('IT_AFRU');    // tabela rezultatov
+         k2 := Tabs.rowCount ;
+         yie := 0 ;
+         for m := 1 to k2 do
+         begin
+            yie := yie + Tabs.value(m,38);
+         end ;
+       end;   // konec pregled nalogov šamotov
+       //mat := KodaConv(mtp,'O') ;
+       mat := KodaForm(mtp,SL,false) ;
+       ZapisSk(mat,ix,yie,zplist) ;
+    end;
+
+   // mat := KodaConv(mtp,'O') ;
+    mat := KodaForm(mtp,SL,false) ;
+    ZapisSam(kk,idc,ln,mat,kodpl,nzp,ix,splist) ;
+end ;
+
+Procedure Tprenos.ZapisSk(mt : string; ix,rz : longint; var zlist: tlist) ;
+  var pp : ^zalsam ;
+      ii : Integer;
+      nasel : boolean ;
+begin
+  new(pp) ;
+  pp^.mat := mt ;
+  pp^.zal := 0 ;
+  pp^.pec := rz ;
+  if zlist.IndexOf(pp) = -1  then zlist.add(pp) ;
+end;
+
+procedure Tprenos.ZapisSup(mat: string; ix : longint; slist : tlist) ;
+  var ii : integer ;
+      pp : ^sams ;
+begin
+  for ii  := 0 to slist.count-1 do
+  begin
+    pp := slist[ii] ;
+    if  (pp.mat_pl = mat) then
+    begin
+      pp^.kolic := pp^.kolic + ix ;
+      break
+    end;
+  end;
+end;
+
+Procedure Tprenos.zaloge(opr : integer;slist,zlist : tlist) ;
+   var funct1, funct2 : variant ;
+       dn,tx,mat,mtt,mtz : string ;
+       ix,sx,rx,iy,iz,ux,kp,xx : Longint ;
+       ii,jj,id,jx,zx,zlx,zl : integer ;
+       pp : ^zalsam ;
+       p1 : ^sams ;
+       tt : longint ;
+       dd : TdateTime ;
+       izm : integer;
+       probr : tlist ;
+       pro : ^prems ;
+begin
+  Prijava ;
+  if Connection.LogOn(0,true) = true then  (* parameter "true" = SilentLogOn *)
+  begin
+    //ADOtable4.First ;
+    //while not AdoTable4.Eof  do
+    tx := intTostr(opr) + ' Prenos zalog ' + IntToStr(opr) + ' ' ;
+    Fzacetek.Progressbar1.Min := 0 ;
+    Fzacetek.Progressbar1.Max := zlist.count ;
+    Fzacetek.ProgressBar1.Position := 0;
+    Fzacetek.ProgressBar1.Step := 1;
+    Fzacetek.label1.Caption := tx + '1/'+IntTostr(zlist.count) ;
+    Fzacetek.label1.Update ;
+
+    tt := GetTickCount ;
+    // raèunanje zalog polizdelka
+    for ii := 0 to zlist.Count-1 do    // po vseh kodah polizdelka
+    begin
+      Fzacetek.ProgressBar1.StepIt;
+      Fzacetek.ProgressBar1.Update;
+      Fzacetek.label1.Caption := 'A' + tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(zlist.count) ;
+      Fzacetek.label1.Update ;
+
+      pp := zlist[ii] ;
+      dn := pp^.mat ;
+      mat := koda18(trim(dn)) ;
+   //   mat := KodaConv(dn,'I') ;
+      pp^.zal := ZalogeZaMat(mat)  ;
+    end;
+    //SHowMessage(inttoStr(gettickCount-tt)) ;
+
+    tt := GetTickCount ;
+    for jj  := 0 to zlist.count-1 do     // še enkrat po polizdelkih
+    begin
+      pp := zlist[jj] ;
+      dn := pp^.mat ;
+      ix := pp^.zal ;
+
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      begin
+        p1 := slist[ii] ;
+        if p1^.mat = dn then
+        begin
+          rx := p1.kolic - pp^.zal ;
+          if rx > 0 then           // èe so potrebe veèje od zaloge
+          begin
+            p1^.zal := pp^.zal ;
+            pp^.zal := 0 ;
+            if rx > pp^.pec then
+            begin
+              p1^.pec := pp^.pec ;
+              pp^.pec := 0
+            end else
+            begin
+              p1^.pec := rx ;
+              pp^.pec := pp^.pec - rx ;
+            end;
+          end else
+          begin                                // zaloge so veèje od potreb
+            p1.zal :=  p1^.kolic;
+            pp^.zal := pp^.zal- p1^.kolic
+          end;
+        end;
+      end ;
+    end;
+  end;
+  //SHowMessage(inttoStr(gettickCount-tt)) ;
+  // SHowmessage('D') ;
+      Fzacetek.Progressbar1.BarColor := clBlue ;
+      Fzacetek.Progressbar1.Min := 0 ;
+      Fzacetek.Progressbar1.Max := slist.Count ;
+      Fzacetek.ProgressBar1.Position := 0;
+      Fzacetek.ProgressBar1.Step := 1;
+      Fzacetek.ProgressBar1.Update ;
+      Fzacetek.label1.Caption := tx + '1/'+IntTostr(slist.Count) ;
+      Fzacetek.label1.Update ;
+  case opr of
+    1 :
+    begin
+      tx := 'Zapis šamotov ' ;
+      tt := GettickCount ;
+
+       Fizvedi.ADOQuery4.SQL.Clear ;
+       Fizvedi.ADOquery4.SQL.add('delete from samoti') ;
+       Fizvedi.ADOquery4.execSQL ;
+
+      Fizvedi.ADOQuery4.SQL.Clear ;
+      Fizvedi.ADOquery4.SQL.add('select * from samoti') ;
+      Fizvedi.AdoQuery4.Open;
+
+      Fizvedi.ADOQuery3.SQL.Clear ;
+      Fizvedi.ADOquery3.SQL.add('select * from premerSam') ;
+      Fizvedi.AdoQuery3.Open;
+
+      Fizvedi.AdoQuery3.First ;
+      while Not Fizvedi.AdoQuery3.Eof  do
+      begin
+        try
+          Fizvedi.AdoQuery3.edit ;
+          Fizvedi.AdoQuery3.FieldByname('vsota').value := 0 ;
+          Fizvedi.AdoQuery3.Post ;
+        except
+          //SHowMessage('Problem pri raèunanju vsote šamotov')
+        end;
+        Fizvedi.AdoQuery3.Next ;
+      end;
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      begin
+        Fzacetek.ProgressBar1.StepIt;
+        Fzacetek.ProgressBar1.Update;
+        Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+        Fzacetek.label1.Update ;
+
+        p1 := slist[ii] ;
+
+        ix := p1^.kolic - p1^.zal ;
+        if p1^.pec > 0 then iz := p1^.pec else iz := 0 ;
+
+        iy := ix - iz ;
+        sx := sx + ix ;
+       // if p1^.pec < 0 then Showmessage(p1^.mat) ;
+        sleep(100) ;
+        Fizvedi.ZapisSam(p1^.iprem,p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,p1^.pec,ix,iy) ;
+
+        id := p1^.iprem  ;
+        if Fizvedi.ADOQuery3.Locate('zap',id,[]) then
+        begin
+          try
+            Fizvedi.ADOQuery3.edit ;
+            ux := Fizvedi.ADOQuery3.FieldByname('vsota').value ;
+            Fizvedi.ADOQuery3.FieldByname('vsota').value := ux + ix ;
+            Fizvedi.ADOQuery3.Post ;
+          except
+           // on e: exception do Showmessage(E.message) ;
+            // SHowMessage('Problem pri raèunanju vsote šamotov')
+          end;
+         //ShowMessage(IntTostr(id)) ;
+        end;
+      end;
+      Fizvedi.ADOQuery4.Close ;
+      Fizvedi.ADOQuery3.Close ;
+    end;
+    2 :
+    begin
+
+      Fizvedi.ADOQuery7.SQL.Clear ;
+      Fizvedi.ADOquery7.SQL.add('delete from protekt') ;
+      Fizvedi.ADOquery7.execSQL ;
+
+      Fizvedi.ADOQuery7.SQL.Clear ;
+      Fizvedi.ADOquery7.SQL.add('select * from protekt') ;
+      Fizvedi.AdoQuery7.Open;
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      begin
+        Fzacetek.ProgressBar1.StepIt;
+        Fzacetek.ProgressBar1.Update;
+        Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+        Fzacetek.label1.Update ;
+        p1 := slist[ii] ;
+        ix := p1^.kolic - p1^.zal ;
+        sleep(100) ;
+        Fizvedi.ZapisPro(p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix) ;
+      end ;
+      Fizvedi.AdoQuery7.Close ;
+    end;
+    3 :
+    begin
+      Fizvedi.ADOQuery8.SQL.Clear ;
+      Fizvedi.ADOquery8.SQL.add('delete from sponke') ;
+      Fizvedi.ADOquery8.execSQL ;
+
+      Fizvedi.ADOQuery8.SQL.Clear ;
+      Fizvedi.ADOquery8.SQL.add('select * from sponke') ;
+      Fizvedi.AdoQuery8.Open;
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      begin
+        Fzacetek.ProgressBar1.StepIt;
+        Fzacetek.ProgressBar1.Update;
+        Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+        Fzacetek.label1.Update ;
+        p1 := slist[ii] ;
+        ix := p1^.kolic - p1^.zal ;
+        sleep(100) ;
+        //form1.ADOtable8.AppendRecord([p1^.ipl,p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix]) ;
+        Fizvedi.ZapisSpo(p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix) ;
+      end ;
+      Fizvedi.AdoQuery8.Close ;
+    end;
+
+    4 :
+    begin
+      Fizvedi.ADOQuery9.SQL.Clear ;
+      Fizvedi.ADOquery9.SQL.add('delete from ulitki') ;
+      Fizvedi.ADOquery9.execSQL ;
+
+      Fizvedi.ADOQuery9.SQL.Clear ;
+      Fizvedi.ADOquery9.SQL.add('select * from ulitki') ;
+      Fizvedi.AdoQuery9.Open;
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      begin
+        Fzacetek.ProgressBar1.StepIt;
+        Fzacetek.ProgressBar1.Update;
+        Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+        Fzacetek.label1.Update ;
+        p1 := slist[ii] ;
+        ix := p1^.kolic - p1^.zal ;
+        sleep(100) ;
+       // form1.ADOtable9.AppendRecord([p1^.ipl,p1^.iprem,p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix]) ;
+        Fizvedi.ZapisUli(p1^.iprem,p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix) ;
+      end ;
+      Fizvedi.AdoQuery9.Close ;
+    end;
+
+    5 :
+    begin
+      Fizvedi.ADOQuery10.SQL.Clear ;
+      Fizvedi.ADOquery10.SQL.add('delete from spirale') ;
+      Fizvedi.ADOquery10.execSQL ;
+
+      Fizvedi.ADOQuery10.SQL.Clear ;
+      Fizvedi.ADOquery10.SQL.add('select * from spirale') ;
+      Fizvedi.AdoQuery10.Open;
+      kp := 7400*7 ;
+      dd := Date ;
+      izm := 1 ;
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      begin
+        Fzacetek.ProgressBar1.StepIt;
+        Fzacetek.ProgressBar1.Update;
+        Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+        Fzacetek.label1.Update ;
+        p1 := slist[ii] ;
+        p1^.zal := ZalogeZaMat(p1^.mat)  ;
+        sleep(100) ;
+       // mtt := KodaConv(p1^.mat,'O') ;
+        mtt := KodaForm(p1^.mat,SL,false) ;
+        ix := p1^.kolic - p1^.zal ;
+        if ix > 0 then
+        begin
+          xx := ix ;
+          while kp < xx do
+          begin
+            povecaj(dd,izm) ;
+            xx := xx - kp ;
+          end ;
+          kp := kp -  ix ;
+          //form1.ADOtable10.AppendRecord([p1^.ipl,p1^.iprem,p1^.linija,mtt,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix,dd,izm]) ;
+          Fizvedi.ZapisSpi(p1^.iprem,p1^.linija,mtt,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix) ;
+          Fizvedi.AdoQuery10.edit ;
+          Fizvedi.adoQuery10.Fieldbyname('dan').value := dd ;
+          Fizvedi.adoQuery10.Fieldbyname('izmena').value := izm ;
+          Fizvedi.AdoQuery10.post ;
+        end else
+          //form1.ADOtable10.AppendRecord([p1^.ipl,p1^.iprem,p1^.linija,mtt,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix]) ;
+          Fizvedi.ZapisSpi(p1^.iprem,p1^.linija,mtt,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix) ;
+      end ;
+    end ;
+    6 :
+    begin
+      Fizvedi.ADOQuery8.SQL.Clear ;
+      Fizvedi.ADOquery8.SQL.add('delete from obroci') ;
+      Fizvedi.ADOquery8.execSQL ;
+
+      Fizvedi.ADOQuery8.SQL.Clear ;
+      Fizvedi.ADOquery8.SQL.add('select * from obroci') ;
+      Fizvedi.AdoQuery8.Open;
+      probr := Tlist.Create ;
+      ii := 1 ;
+      kp := GetKapObr(ii) ;
+      while kp > 0 do         // po vseh tipih obrocev
+      begin
+        new(pro) ;
+        pro^.idp := ii ;
+        pro^.kap := kp ;
+        pro^.dat := date ;
+        pro^.izm := 1 ;
+        probr.add(pro) ;
+        inc(ii) ;
+        kp := GetKapObr(ii)
+      end;
+      dd := Date ;
+      izm := 1 ;
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in obroèev
+      begin
+        Fzacetek.ProgressBar1.StepIt;
+        Fzacetek.ProgressBar1.Update;
+        Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+        Fzacetek.label1.Update ;
+        p1 := slist[ii] ;
+        jx := -1 ;
+        for jj := 0 to probr.Count-1 do      // ugotovim za kateri tip obroèa gre
+        begin
+          pro := probr[jj] ;
+          if pro^.idp = p1^.iprem then
+          begin
+            jx := jj ;
+            kp := pro^.kap ;
+            dd := pro^.dat ;
+            izm := pro^.izm ;
+          end;
+        end;
+
+        for jj  := 0 to zlist.count-1 do     // še enkrat po polizdelkih
+        begin
+         pp := zlist[jj] ;
+         dn := pp^.mat ;
+         if p1^.mat = pp^.mat then
+         begin
+           zx := jj ;
+           zl :=  pp^.zal
+         end ;
+        end ;
+
+        if zl > p1^.kolic then
+        begin
+          zl := zl - p1^.kolic ;
+          zlx :=  p1^.kolic ;
+          pp := zlist[zx] ;
+          pp^.zal := zl ;
+          ix := 0
+        end else
+        begin
+          zlx := zl ;
+         // mtz := KodaConv(p1^.mat,'I') ;
+          p1^.zal := zl  ;
+          ix := p1^.kolic - p1^.zal ;
+          sleep(100) ;
+          //form1.ADOtable8.AppendRecord([p1^.ipl,p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix]) ;
+          //mtt := KodaConv(p1^.mat,'O') ;
+          mtt := KodaForm(p1^.mat,SL,false) ;
+          ix := p1^.kolic - p1^.zal ;
+
+          xx := ix ;
+          while kp < xx do
+          begin
+            povecaj(dd,izm) ;
+            xx := xx - kp ;
+            pro := probr[jx] ;
+          //  kp := pro^.kap ;
+            kp := GetKapObr(jx+1) ;
+            pro^.dat := dd ;
+            pro^.izm := izm ;
+          end ;
+          if jx >= 0 then
+          begin
+            pro := probr[jx] ;
+            pro^.kap := kp - xx ;
+          end;
+        end;
+          //form1.ADOtable10.AppendRecord([p1^.ipl,p1^.iprem,p1^.linija,mtt,p1^.mat_pl,p1^.naziv,p1^.kolic,p1^.zal,ix,dd,izm]) ;
+        Fizvedi.ZapisSpo(p1^.linija,p1^.mat,p1^.mat_pl,p1^.naziv,p1^.kolic,zlx,ix) ;
+        Fizvedi.AdoQuery8.edit ;
+        Fizvedi.adoQuery8.Fieldbyname('zap').value := p1^.iprem ;
+      //  Fizvedi.adoQuery8.Fieldbyname('dan').value := dd ;
+      //  Fizvedi.adoQuery8.Fieldbyname('izmena').value := izm ;
+        Fizvedi.AdoQuery8.post ;
+
+      end ;
+      pocisti5(probr) ;
+      Fizvedi.AdoQuery8.Close ;
+    end;
+
+
+     // Fizvedi.AdoQuery10.Close ;
+    //end;
+  end;
+
+  // SHowMessage(inttoStr(gettickCount-tt)) ;
+ // Connection.LogOff ;
+ // zlist.Free ;
+end ;
+
+
+function Tprenos.GetKapObr(ii : integer) : integer ;
+begin
+   Fizvedi.adoquery9.sql.clear ;
+   Fizvedi.Adoquery9.sql.Add('select * from premobr where zap = :ID') ;
+   Fizvedi.Adoquery9.parameters[0].value := ii ;
+   Fizvedi.Adoquery9.parameters[0].name := 'ID' ;
+   Fizvedi.Adoquery9.open ;
+   if Fizvedi.adoquery9.isempty then result := 0 else result := Fizvedi.Adoquery9.fieldbyname('kapaciteta').value ;
+   Fizvedi.Adoquery9.Close ;
+end;
+
+Procedure Tprenos.zaloge_sp(slist,svlist: Tlist) ;
+var
+  i,nas,k: Integer;
+  kl,zl1,zl2,zl3,pl1,pl2,pl3,rz : longint ;
+  kdsm,kd1,kd2,kd3,nz1,nz2,nz3,tx  : string ;
+  p1,pp : ^sams ;
+
+  procedure urediSp(kd,nz : string; zl : longint) ;
+    var pl : longint ;
+        j : Integer ;
+        mtt : string ;
+  begin
+     if kl < zl  then
+     begin
+        zl := zl-kl ;
+        pl := kl ;
+     end else
+     begin
+        pl := zl ;
+        zl := 0 ;
+     end ;
+     rz := kl -pl ;
+    // mtt := KodaConv(kd,'O') ;
+     mtt := KodaForm(kd,SL,false) ;
+     //form1.ADOtable10.AppendRecord([p1^.ipl,p1^.iprem,p1^.linija,mtt,kdsm,nz,kl,pl,rz]) ;
+     Fizvedi.ZapisSpi(p1^.iprem,p1^.linija,mtt,kdsm,nz,kl,pl,rz) ;
+     for j := 1 to svlist.count-1 do
+     begin
+        pp := svlist[j] ;
+        if pp^.mat = kd then pp^.zal := zl ;
+        break
+     end;
+  end ;
+
+begin
+  Fizvedi.ADOQuery10.SQL.Clear ;
+  Fizvedi.ADOquery10.SQL.add('delete from spirale') ;
+  Fizvedi.ADOquery10.execSQL ;
+
+  Fizvedi.ADOQuery10.SQL.Clear ;
+  Fizvedi.ADOquery10.SQL.add('select * from spirale') ;
+  Fizvedi.AdoQuery10.Open;
+  tx := 'Prenos zalog A ' ;
+  for i := 1 to svlist.count-1 do
+  begin
+     pp := svlist[i] ;
+     pp^.zal := ZalogeZaMat(pp^.mat) ;
+  end;
+
+  Fzacetek.Progressbar1.BarColor := clBlue ;
+  Fzacetek.Progressbar1.Min := 0 ;
+  Fzacetek.Progressbar1.Max := slist.Count ;
+  Fzacetek.ProgressBar1.Position := 0;
+  Fzacetek.ProgressBar1.Step := 1;
+  Fzacetek.ProgressBar1.Update ;
+  Fzacetek.label1.Caption := tx + '1/'+IntTostr(slist.Count) ;
+  Fzacetek.label1.Update ;
+
+  for i := 0 to slist.count-1 do
+  begin
+     Fzacetek.ProgressBar1.StepIt;
+     Fzacetek.ProgressBar1.Update;
+     Fzacetek.label1.Caption := tx + IntTostr(Fzacetek.Progressbar1.position) + '/' + IntTostr(slist.count) ;
+     Fzacetek.label1.Update ;
+
+     p1 := slist[i] ;
+     kdsm := p1^.mat ;
+     kl := p1^.kolic ;
+     k := 0 ;
+     nas := 0 ;
+     kd1 := '' ;
+     kd2 := '' ;
+     kd3 := '' ;
+     while (k < svlist.count) and (nas < 3) do
+     begin
+        pp := svlist[k] ;
+        if kdsm = pp^.mat_pl then
+        begin
+          case nas of
+            0 : begin
+              kd1 := pp^.mat ;
+              nz1 := pp^.naziv ;
+              zl1 := pp^.zal ;
+              inc(nas)
+            end;
+            1 : begin
+              kd2 := pp^.mat ;
+              nz2 := pp^.naziv ;
+              zl2 := pp^.zal ;
+              inc(nas)
+            end;
+            2 : begin
+              kd3 := pp^.mat ;
+              nz3 := pp^.naziv ;
+              zl3 := pp^.zal ;
+              inc(nas)
+            end;
+          end;
+        end;
+        inc(k) ;
+     end ;
+
+     if kd1 <> '' then urediSp(kd1,nz1,zl1) ;
+     if kd2 <> '' then urediSp(kd2,nz2,zl2) ;
+     if kd3 <> '' then urediSp(kd3,nz3,zl3) ;
+  end;
+  Fizvedi.AdoQuery10.Close ;
+end;
+
+
+
+Procedure Tprenos.Vsota ;
+   var ss,xx,kp,tt : longint ;
+      dd,dat : TdateTime ;
+      izm,izz,i,st : integer ;
+      kdp,upr,nz : string ;
+      kap,sx : longint ;
+
+begin
+  list := Tlist.Create ;
+  ListaPrek(list);
+
+  clist := Tlist.Create ;
+  ListaDod(clist);
+
+  //ADOtable1.Locktype := ltOptimistic;
+  FIzvedi.ADOTable1.First ;
+
+  Fizvedi.ADOQuery4.SQL.Clear ;
+  Fizvedi.ADOquery4.SQL.add('select * from samoti') ;
+  Fizvedi.AdoQuery4.Open;
+
+  Fizvedi.ADOQuery10.SQL.Clear ;
+  Fizvedi.ADOquery10.SQL.add('select * from spirale') ;
+  Fizvedi.AdoQuery10.Open;
+
+  Fizvedi.ADOQuery9.SQL.Clear ;
+  Fizvedi.ADOquery9.SQL.add('select * from ulitki') ;
+  Fizvedi.AdoQuery9.Open;
+
+  Fizvedi.ADOQuery7.SQL.Clear ;
+  Fizvedi.ADOquery7.SQL.add('select * from protekt') ;
+  Fizvedi.AdoQuery7.Open;
+
+  Fizvedi.ADOQuery8.SQL.Clear ;
+  Fizvedi.ADOquery8.SQL.add('select * from sponke') ;
+  Fizvedi.AdoQuery8.Open;
+
+  Fizvedi.ADOQuery6.SQL.Clear ;
+  Fizvedi.ADOquery6.SQL.add('select * from obroci') ;
+  Fizvedi.AdoQuery6.Open;
+
+  while not Fizvedi.ADOTable1.eof do       // po vseh trakovih PLAT
+  begin
+    Fzacetek.ProgressBar1.StepIt;
+    Fzacetek.ProgressBar1.Update;
+    Fzacetek.label1.Caption :=  IntTostr(Fizvedi.adotable1stev.value)  ;
+    Fzacetek.label1.Update ;
+
+    kp := Round(FIzvedi.AdoTable1kapaciteta.value) ;
+    ss := 0 ;
+    dd := date ;
+    izm := 1 ;
+
+    st := Fizvedi.adotable1stev.value ;
+    Fizvedi.ADOQuery2.SQL.Clear ;
+    Fizvedi.ADOquery2.SQL.add('select * from plosce where stev = :ST order by danstart') ;
+    Fizvedi.ADOquery2.parameters[0].value := st ;
+    Fizvedi.ADOquery2.parameters[0].name  := 'ST' ;
+    Fizvedi.AdoQuery2.Open;
+    Fizvedi.AdoQuery2.First;
+
+    while not Fizvedi.AdoQuery2.eof do     // po vseh nalogih za plošèe
+    begin
+      tt := GetTickCount ;
+      xx := Round(Fizvedi.AdoQuery2kolicina.value) ;
+      ss := ss + xx ;
+      kdp :=  Fizvedi.AdoQuery2koda.value ;
+
+      Fzacetek.ProgressBar1.StepIt;
+      Fzacetek.ProgressBar1.Update;
+      Fzacetek.label1.Caption :=  kdp  ;
+      Fzacetek.label1.Update ;
+
+      //sleep(100) ;
+      Fizvedi.AdoQuery2.edit ;
+      Fizvedi.AdoQuery2dan.value := dd ;
+      Fizvedi.AdoQuery2izmena.value := izm ;
+      Fizvedi.AdoQuery2.Post ;
+
+      tt := GetTickCount ;
+      Izmcas(kdp,dd,izm) ;
+      while kp < xx do
+      begin
+        povecaj(dd,izm) ;
+        xx := xx - kp ;
+        kp := Round(FIzvedi.AdoTable1kapaciteta.value) ;
+      end ;
+      kp := kp -  xx ;
+      Fizvedi.AdoQuery2.Next ;
+    end;
+    // vpišem vsoto za en trak
+    try
+      FIzvedi.ADOTable1.edit ;
+      FIzvedi.ADOTable1vsota.value := ss ;
+      FIzvedi.ADOTable1.post ;
+    except
+      Showmessage('problem pri raèunanju vsote - plošèe') ;
+    end ;
+   // SHowmessage(intTostr(kp) + '/' + intTostr(xx)) ;
+    FIzvedi.ADOTable1.next ;
+  end;
+  Fizvedi.AdoQuery4.Close ;
+  Fizvedi.AdoQuery10.Close ;
+  Fizvedi.AdoQuery9.Close ;
+  Fizvedi.AdoQuery2.Close ;
+  Fizvedi.AdoQuery7.Close ;
+  Fizvedi.AdoQuery8.Close ;
+  Fizvedi.AdoQuery6.Close ;
+  Pocisti3(list) ;
+  //list.Free ;
+
+
+ { Fizvedi.ADOQuery7.SQL.Clear ;
+  Fizvedi.ADOquery7.SQL.add('select * from protekt') ;
+  Fizvedi.AdoQuery7.Open;
+  Fizvedi.AdoQuery7.first ;
+  kap := 14100 ;
+  sx := 0 ;
+  dd := date ;
+  izm := 1 ;
+
+  Fzacetek.ProgressBar1.StepIt;
+  Fzacetek.ProgressBar1.Update;
+  Fzacetek.label1.Caption :=  'protekt'   ;
+  Fzacetek.label1.Update ;
+
+
+  while not Fizvedi.ADOQuery7.eof do       // po vseh protektorjih
+  begin
+    sx := sx + Round(Fizvedi.ADOQuery7.FieldByName('razlika').value) ;
+    if sx > kap then
+    begin
+       povecaj(dd,izm) ;
+       sx := sx - kap ;
+    end ;
+    try
+      sleep(100) ;
+      Fizvedi.ADOQuery7.edit ;
+      Fizvedi.ADOQuery7.FieldByName('dan').value := dd ;
+      Fizvedi.ADOQuery7.FieldByName('izmena').value := izm ;
+      Fizvedi.ADOQuery7.post ;
+    except
+      //on e: exception do Showmessage(E.message) ;
+    end ;
+    Fizvedi.ADOQuery7.next ;
+  end ;      }
+
+
+//  Fizvedi.Adotable2.TableName := 'premUlit' ;
+ { Fizvedi.Adotable2.open ;
+  while not Fizvedi.ADOTable2.eof do       // po vseh trakovih PLAT
+  begin
+    Fzacetek.ProgressBar1.StepIt;
+    Fzacetek.ProgressBar1.Update;
+    Fzacetek.label1.Caption :=  IntTostr(Fizvedi.adotable1stev.value)  ;
+    Fzacetek.label1.Update ;
+
+    kap := Round(FIzvedi.AdoTable2kapaciteta.value) ;
+    ss := 0 ;
+    dd := date ;
+    izm := 1 ;
+
+    st := Fizvedi.adotable2zapt.value ;
+    Fizvedi.ADOQuery9.SQL.Clear ;
+    Fizvedi.ADOquery9.SQL.add('select * from ulitki where zap = :ZP') ;
+    Fizvedi.Adoquery9.Parameters[0].name := 'ZP' ;
+    Fizvedi.Adoquery9.Parameters[0].value := st ;
+    Fizvedi.AdoQuery9.Open;
+    Fizvedi.AdoQuery9.first ;
+    sx := 0 ;
+    dd := date ;
+    izm := 1 ;
+    while not Fizvedi.ADOQuery9.eof do       // po vseh ulitkih
+    begin
+      sx := sx + Round(Fizvedi.ADOQuery9.FieldByName('razlika').value) ;
+      if sx > kap then
+      begin
+         povecaj(dd,izm) ;
+         sx := sx - kap ;
+      end ;
+      try
+        sleep(100) ;
+        Fizvedi.ADOQuery9.edit ;
+        Fizvedi.ADOQuery9.FieldByName('dan').value := dd ;
+        Fizvedi.ADOQuery9.FieldByName('izmena').value := izm ;
+        Fizvedi.ADOQuery9.post ;
+      except
+        //on e: exception do Showmessage(E.message) ;
+      end ;
+      Fizvedi.ADOQuery9.next ;
+    end ;
+    Fizvedi.Adotable2.Next ;
+  end ;
+  Fizvedi.Adotable2.close ;      }
+
+
+
+
+  Fzacetek.ProgressBar1.StepIt;
+  Fzacetek.ProgressBar1.Update;
+  Fzacetek.label1.Caption :=  'sponke'   ;
+  Fzacetek.label1.Update ;
+
+  Fizvedi.ADOQuery8.SQL.Clear ;
+  Fizvedi.ADOquery8.SQL.add('select * from sponke') ;
+  Fizvedi.AdoQuery8.Open;
+  Fizvedi.AdoQuery8.first ;
+  kap := 8000 ;
+  sx := 0 ;
+  dd := date ;
+  izm := 1 ;
+ { while not Fizvedi.AdoQuery8.eof do     // po vseh sponkah
+  begin
+    nz :=  Fizvedi.AdoQuery8.FieldByName('naziv').value ;
+    if pos('FASTON',nz) = 0  then
+    begin
+      sx := sx + Round(Fizvedi.AdoQuery8.FieldByName('razlika').value) ;
+      if sx > kap then
+      begin
+         povecaj(dd,izm) ;
+         sx := sx - kap ;
+      end ;
+      sleep(100) ;
+      try
+        Fizvedi.AdoQuery8.edit ;
+        Fizvedi.AdoQuery8.FieldByName('dan').value := dd ;
+        Fizvedi.AdoQuery8.FieldByName('izmena').value := izm ;
+        Fizvedi.AdoQuery8.post ;
+      except
+        Showmessage('problem pri zapisu sponke') ;
+      end ;
+    end ;
+    Fizvedi.AdoQuery8.next ;
+  end ;
+
+
+  Fzacetek.ProgressBar1.StepIt;
+  Fzacetek.ProgressBar1.Update;
+  Fzacetek.label1.Caption :=  'faston sponke'  ;
+  Fzacetek.label1.Update ;
+
+  Fizvedi.AdoQuery8.first ;
+  kap := 8000 ;
+  sx := 0 ;
+  dd := date ;
+  izm := 1 ;
+  while not Fizvedi.AdoQuery8.eof do
+  begin
+    nz :=  Fizvedi.AdoQuery8.FieldByName('naziv').value ;
+   // ShowMessage(nz) ;
+    if pos('FASTON',nz) > 0  then
+    begin
+      sx := sx + Round(Fizvedi.AdoQuery8.FieldByName('razlika').value) ;
+      if sx > kap then
+      begin
+         povecaj(dd,izm) ;
+         sx := sx - kap ;
+      end ;
+      sleep(100) ;
+      Fizvedi.AdoQuery8.edit ;
+      Fizvedi.AdoQuery8.FieldByName('dan').value := dd ;
+      Fizvedi.AdoQuery8.FieldByName('izmena').value := izm ;
+      Fizvedi.AdoQuery8.post ;
+    end ;
+    Fizvedi.AdoQuery8.next ;
+  end ;  }
+
+  //clist.Free ;
+  Pocisti4(clist) ;
+//  showMessage(intTostr(clist.Count)) ;
+ // Fizvedi.AdoTable1.close ;
+  //CopyFile('plo_prenos.dbf','plo_trans.dbf') ;
+  //CopyFile('sam_prenos.dbf','sam_trans.dbf') ;
+end;
+
+Procedure Tprenos.ListaPrek(var list : Tlist) ;
+  var ii : Integer ;
+      prvic : boolean ;
+      pp : ^prrk ;
+begin
+  Fizvedi.ADOQuery5.SQL.Clear ;
+  Fizvedi.ADOquery5.SQL.add('select * from prekinitve') ;
+  Fizvedi.AdoQuery5.Open;
+  Fizvedi.AdoQuery5.First ;
+  while not Fizvedi.AdoQuery5.eof  do
+  begin
+    if Fizvedi.AdoQuery5.Fieldbyname('dan').value >= date then
+    begin
+      prvic := true ;
+      for ii := 0 to list.count-1 do
+      begin
+        pp := list[ii] ;
+        if (pp^.dt = Fizvedi.AdoQuery5.Fieldbyname('dan').value) and (pp^.trak = Fizvedi.AdoQuery5.Fieldbyname('trak').value) and (pp^.izmena = Fizvedi.AdoQuery5.Fieldbyname('izmena').value) then
+        begin
+          prvic := false ;
+          pp^.stev :=  pp^.stev + (1 shl Fizvedi.AdoQuery5.Fieldbyname('ura').value)
+        end;
+      end;
+      if prvic then
+      begin
+        new(pp) ;
+        pp^.dt := Fizvedi.AdoQuery5.Fieldbyname('dan').value ;
+        pp^.izmena := Fizvedi.AdoQuery5.Fieldbyname('trak').value ;
+        pp^.trak := Fizvedi.AdoQuery5.Fieldbyname('izmena').value ;
+        pp^.stev := (1 shl Fizvedi.AdoQuery5.Fieldbyname('ura').value) ;
+        list.Add(pp) ;
+      end;
+    end;
+    Fizvedi.AdoQuery5.next ;
+  end;
+  Fizvedi.AdoQuery5.Close ;
+end;
+
+Procedure Tprenos.ListaDod(var clist : Tlist) ;
+  var ii : Integer ;
+      prvic : boolean ;
+      pp : ^prrn ;
+begin
+  Fizvedi.ADOQuery6.SQL.Clear ;
+  Fizvedi.ADOquery6.SQL.add('select * from prekinitve') ;
+  Fizvedi.AdoQuery6.Open;
+  Fizvedi.AdoQuery6.First ;
+  while not Fizvedi.AdoQuery6.eof  do
+  begin
+    if Fizvedi.AdoQuery6.Fieldbyname('dan').value >= date then
+    begin
+      new(pp) ;
+      pp^.dt := Fizvedi.AdoQuery6.Fieldbyname('dan').value ;
+      pp^.izmena := Fizvedi.AdoQuery6.Fieldbyname('izmena').value ;
+      pp^.trak := Fizvedi.AdoQuery6.Fieldbyname('trak').value ;
+      clist.Add(pp) ;
+    end;
+    Fizvedi.AdoQuery6.next ;
+  end;
+  Fizvedi.AdoQuery6.Close ;
+end;
+
+procedure Tprenos.Izmcas(kdp : string; dd : TdateTime; izm : integer) ;
+  var kdd : string ;
+      kl : integer ;
+      ikl : boolean ;
+begin
+  if Fizvedi.AdoQuery4.Locate('koda_pl',kdp, []) then
+  begin
+    kdd := Fizvedi.AdoQuery4.FieldByName('koda').value ;
+    kl := Fizvedi.AdoQuery4.FieldByName('kolic').value ;
+    if Fizvedi.AdoQuery4.FieldByName('izmena').isnull then
+    begin
+       try
+         Fizvedi.AdoQuery4.edit ;
+         Fizvedi.AdoQuery4.FieldByName('dan').value := dd ;
+         Fizvedi.AdoQuery4.FieldByName('izmena').value := izm ;
+         Fizvedi.AdoQuery4.post ;
+       except
+         ShowMessage('Zapis datuma pri šamotih') ;
+       end;
+    end;
+
+    // špirale
+
+    Fizvedi.AdoQuery10.last ;
+    while not Fizvedi.AdoQuery10.bof do
+    begin
+       if (kdd = Fizvedi.AdoQuery10.FieldByName('koda_pl').value) then
+       begin
+         try
+           ikl :=  Fizvedi.AdoQuery10.FieldByName('kolic').value  = kl  ;
+           if Fizvedi.AdoQuery10.FieldByName('dan').isnull  or ikl then
+           begin
+             Fizvedi.AdoQuery10.edit ;
+             Fizvedi.AdoQuery10.FieldByName('dan').value := dd ;
+             Fizvedi.AdoQuery10.FieldByName('izmena').value := izm ;
+             Fizvedi.AdoQuery10.post ;
+           end ;
+         except
+           ShowMessage('Zapis datuma pri šamotih') ;
+         end;
+       end;
+        Fizvedi.AdoQuery10.Prior ;
+    end;
+
+    //ulitki
+    Fizvedi.AdoQuery9.last ;
+    while not Fizvedi.AdoQuery9.bof do
+    begin
+       if (kdd = Fizvedi.AdoQuery9.FieldByName('koda_pl').value) then
+       begin
+         try
+           ikl :=  Fizvedi.AdoQuery9.FieldByName('kolic').value  = kl  ;
+           if Fizvedi.AdoQuery9.FieldByName('dan').isnull  or ikl then
+           begin
+             Fizvedi.AdoQuery9.edit ;
+             Fizvedi.AdoQuery9.FieldByName('dan').value := dd ;
+             Fizvedi.AdoQuery9.FieldByName('izmena').value := izm ;
+             Fizvedi.AdoQuery9.post ;
+           end;
+         except
+           ShowMessage('Zapis datuma pri šamotih') ;
+         end;
+       end;
+        Fizvedi.AdoQuery9.Prior ;
+    end;
+
+  end;
+
+  //protekt
+  Fizvedi.AdoQuery7.first ;
+  while not Fizvedi.AdoQuery7.eof do
+  begin
+     if kdp = Fizvedi.AdoQuery7.FieldByName('koda_pl').value then
+     begin
+         try
+           Fizvedi.AdoQuery7.edit ;
+           Fizvedi.AdoQuery7.FieldByName('dan').value := dd ;
+           Fizvedi.AdoQuery7.FieldByName('izmena').value := izm ;
+           Fizvedi.AdoQuery7.post ;
+         except
+           ShowMessage('Zapis datuma pri šamotih') ;
+         end;
+     end;
+     Fizvedi.AdoQuery7.Next ;
+  end;
+
+  Fizvedi.AdoQuery8.first ;
+  while not Fizvedi.AdoQuery8.eof do
+  begin
+     if kdp = Fizvedi.AdoQuery8.FieldByName('koda_pl').value then
+     begin
+       try
+         Fizvedi.AdoQuery8.edit ;
+         Fizvedi.AdoQuery8.FieldByName('dan').value := dd ;
+         Fizvedi.AdoQuery8.FieldByName('izmena').value := izm ;
+         Fizvedi.AdoQuery8.post ;
+       except
+         ShowMessage('Zapis datuma pri šamotih') ;
+       end;
+     end;
+     Fizvedi.AdoQuery8.Next ;
+  end;
+
+  Fizvedi.AdoQuery6.first ;
+  while not Fizvedi.AdoQuery6.eof do
+  begin
+     if kdp = Fizvedi.AdoQuery6.FieldByName('koda_pl').value then
+     begin
+       try
+         Fizvedi.AdoQuery6.edit ;
+         Fizvedi.AdoQuery6.FieldByName('dan').value := dd ;
+         Fizvedi.AdoQuery6.FieldByName('izmena').value := izm ;
+         Fizvedi.AdoQuery6.post ;
+       except
+         ShowMessage('Zapis datuma pri šamotih') ;
+       end;
+     end;
+     Fizvedi.AdoQuery6.Next ;
+  end;
+end;
+
+
+
+Function Tprenos.ZalogeZaMat(koda : string) : longint;
+  var funct1 : variant ;
+begin
+   fIzvedi.SAPFunctions1.Connection := Idispatch(Connection);
+   funct1 := fIzvedi.sapFunctions1.add('BAPI_MATERIAL_STOCK_REQ_LIST');
+   funct1.exports('MATERIAL').value := koda ;
+   funct1.exports('PLANT').value := plant ;
+   funct1.call ;
+   result := funct1.imports('MRP_LIST').value(48) ;
+end ;
+
+Procedure Tprenos.povecaj(var dd : TdateTime; var izm : Integer) ;
+ begin
+    case izm of
+      1 :  izm := 2 ;
+      2 :
+          if getnocna(dd,Fizvedi.ADOTable1stev.Value,3) then izm := 3
+             else nasled(dd,izm) ;
+
+      3 :
+        begin
+          nasled(dd,izm) ;
+          izm := 1 ;
+        end;
+    end;
+end;
+
+Function Tprenos.GetNocna(dd : TdateTime; istev : integer; iz : integer) : boolean ;
+  var bb : boolean ;
+      pp : ^prrn ;
+      ii : Integer ;
+begin
+  bb := false ;
+  if assigned(clist) then
+  begin
+    for ii := 0 to clist.count-1 do
+    begin
+      pp := clist[ii] ;
+      if (pp^.trak = istev) and (pp^.dt = dd) and (pp^.izmena = iz) then
+      begin
+        bb := true ;
+        break ;
+      end;
+    end;
+  end;
+  result := bb ;
+end ;
+
+procedure Tprenos.nasled(var dd : TdateTime; var izm : Integer) ;
+begin
+   izm := 1 ;
+   dd := dd+1 ;
+   if dayofweek(dd) = 7 then
+   begin
+      if not getnocna(dd,Fizvedi.ADOTable1stev.Value,2) then dd := dd+2 ;
+   end ;
+   if dayofweek(dd) = 1 then dd := dd + 1 ;
+end ;
+
+
+procedure Tprenos.Prijava;
+begin
+  if prija.upo = '' then FPrijavaSAP.getPrijava(prija) ;
+
+  if prija.upo = 'rsg_rfc_1' then plant := '0401' else plant := '1061' ;
+  Connection := Fizvedi.SAPLogoncontrol1.newConnection;
+  with prija do
+  begin
+    Connection.User              := trim(upo) ;
+    Connection.System            := trim(sistem);
+    Connection.Client            := trim(cli);
+    Connection.ApplicationServer := trim(applic);
+    Connection.SystemNumber      := IntTostr(sisnum) ;
+    Connection.Password          := trim(ges);
+    Connection.Language          := trim(jezik) ;
+  end ;
+
+
+ { Connection                   := Fizvedi.SAPLogoncontrol1.newConnection;
+  Connection.User              := 'boncinar' ;
+
+  Connection.System            := 'P01';
+ // Connection.System            := 'Q02';
+  Connection.Client            := '101';
+  Connection.ApplicationServer := 'sapr3.egoproducts.com';
+  // Connection.ApplicationServer := 'sapr3.egoproducts.com';
+  //Connection.ApplicationServer := 'sapq02.egoproducts.com';
+  Connection.ApplicationServer := '10.0.2.41';
+//   Connection.ApplicationServer := '10.0.2.195';
+
+
+  Connection.SystemNumber      := '20';
+  Connection.Password          := 'bon123sap';
+  Connection.User              := 'rsg_rfc_1' ;
+  Connection.Password          := 'khg+987w';
+  Connection.Language          := 'sl' ;  }
+end ;
+
+function CompareSam(pt1,pt2 : pointt) : Integer ;
+begin
+  if pt1^.iprem = pt2^.iprem  then
+  begin
+    if pt1^.ipl = pt2^.ipl  then result := 0
+      else if  pt1^.ipl > pt2^.ipl then result := 1
+                                     else result := -1
+  end
+    else if  pt1^.iprem > pt2^.iprem then result := 1
+                                 else result := -1
+end ;
+
+procedure Tprenos.Pocisti1(list : Tlist) ;
+  var i : integer ;
+      pp : ^zalsam ;
+begin
+  if assigned(list) then
+  begin
+    for i := 0 to (List.Count - 1) do
+    begin
+         pp := List[i];
+     Dispose(pp);
+    end;
+    List.Free ;
+  end;
+end;
+
+procedure Tprenos.Pocisti2(list : Tlist) ;
+  var i : integer ;
+      pp : ^sams ;
+begin
+  if assigned(list) then
+  begin
+    for i := 0 to (List.Count - 1) do
+    begin
+         pp := List[i];
+     Dispose(pp);
+    end;
+    List.Free ;
+  end;
+end;
+
+procedure Tprenos.Pocisti3(list : Tlist) ;
+  var i : integer ;
+      pp : ^prrk ;
+begin
+  if assigned(list) then
+  begin
+    for i := 0 to (List.Count - 1) do
+    begin
+         pp := List[i];
+     Dispose(pp);
+    end;
+    List.Free ;
+  end;
+end;
+
+procedure Tprenos.Pocisti4(list : Tlist) ;
+  var i : integer ;
+      pp : ^prrn ;
+begin
+  if assigned(list) then
+  begin
+   // ShowMessage('list') ;
+    for i := 0 to (List.Count - 1) do
+    begin
+         pp := List[i];
+        // ShowMessage(IntTostr(i)) ;
+     Dispose(pp);
+    end;
+    List.Free ;
+  end;
+end;
+
+procedure Tprenos.Pocisti5(list : Tlist) ;
+  var i : integer ;
+      pp : ^prems ;
+begin
+  if assigned(list) then
+  begin
+    for i := 0 to (List.Count - 1) do
+    begin
+      pp := List[i];
+      Dispose(pp);
+    end;
+    List.Free ;
+  end;
+end;
+
+end.

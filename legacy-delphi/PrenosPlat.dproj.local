@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>1899.12.30 00:00:00.000.971,=D:\Emb_programi\Plata\MontPlat\Prenos\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.318,D:\Emb_programi\Plata\MontPlat\Prenos\Unit1.pas=D:\Emb_programi\Plata\MontPlat\Prenos\prikluci.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.063,D:\Emb_programi\Plata\MontPlat\Prenos\stroji.dfm=D:\Emb_programi\Plata\MontPlat\Prenos\Unit1.dfm</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.063,D:\Emb_programi\Plata\MontPlat\Prenos\stroji.pas=D:\Emb_programi\Plata\MontPlat\Prenos\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.318,D:\Emb_programi\Plata\MontPlat\Prenos\Unit1.dfm=D:\Emb_programi\Plata\MontPlat\Prenos\prikluci.dfm</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.650,=D:\Emb_programi\Plata\MontPlat\Prenos\Unit1.pas</Transaction>
+  </Transactions>
+</BorlandProject>

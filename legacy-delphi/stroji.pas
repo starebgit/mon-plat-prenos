@@ -1,0 +1,69 @@
+unit stroji;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Data.DB, Data.Win.ADODB;
+
+type
+  TFstroji = class(TForm)
+    DataSource1: TDataSource;
+    ADOQuery1: TADOQuery;
+  private
+    { Private declarations }
+  public
+    Procedure povecaj(ids, kl : integer) ;
+    Procedure nanul ;
+  end;
+
+var
+  Fstroji: TFstroji;
+
+implementation
+
+{$R *.dfm}
+
+
+Procedure TFstroji.nanul ;
+  var dir : string ;
+begin
+  dir := ExtractFilePath(application.ExeName) + '\Montaz_pl.udl';
+  Adoquery1.ConnectionString := 'FILE NAME=' + dir ;
+  Adoquery1.sql.clear ;
+  Adoquery1.sql.add('select * from StrojSpir') ;
+  Adoquery1.open ;
+  Adoquery1.first ;
+  while not Adoquery1.eof do
+  begin
+    Adoquery1.edit ;
+    Adoquery1.fieldbyname('vsota').value := 0 ;
+    Adoquery1.post ;
+    Adoquery1.next ;
+  end;
+  adoquery1.close ;
+end;
+
+
+Procedure TFstroji.povecaj(ids, kl : integer) ;
+  var xx : integer ;
+      dir : string ;
+begin
+  dir := ExtractFilePath(application.ExeName) + '\Montaz_pl.udl';
+  Adoquery1.ConnectionString := 'FILE NAME=' + dir ;
+  Adoquery1.sql.clear ;
+  Adoquery1.sql.add('select * from StrojSpir where id_stroj = :IDS') ;
+  Adoquery1.parameters[0].value := ids ;
+  Adoquery1.parameters[0].name := 'IDS' ;
+  Adoquery1.open ;
+  if not adoquery1.isempty then
+  begin
+    xx := Adoquery1.fieldbyname('vsota').value ;
+    Adoquery1.edit ;
+    Adoquery1.fieldbyname('vsota').value := xx + kl ;
+    Adoquery1.post ;
+  end;
+  adoquery1.close ;
+end;
+
+end.

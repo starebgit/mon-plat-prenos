@@ -1,0 +1,14 @@
+program PrenosPlat;
+
+uses
+  Vcl.Forms,
+  zacetek in 'zacetek.pas' {Fzacetek};
+
+{$R *.res}
+
+begin
+  Application.Initialize;
+  Application.MainFormOnTaskbar := True;
+  Application.CreateForm(TFzacetek, Fzacetek);
+  Application.Run;
+end.
