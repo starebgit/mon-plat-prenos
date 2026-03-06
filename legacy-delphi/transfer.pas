@@ -277,7 +277,7 @@ begin
 
 
 
- // Fzacetek.label2.Caption := 'Zaèetni delovni nalog ' + deln ;
+ // Fzacetek.label2.Caption := 'ZaÃ¨etni delovni nalog ' + deln ;
 
   tt := GetTickCount ;
   Screen.Cursor := crHourGlass ;
@@ -298,7 +298,7 @@ begin
     ADOquery2.SQL.add('select * from plosce') ;
     AdoQuery2.Open;
 
-        // preberem listo delovnih nalogov za plošèe
+        // preberem listo delovnih nalogov za ploÂšÃ¨e
     GetProdList(1,'',deln,tab,vredu ) ;
     if not vredu then
     begin
@@ -307,24 +307,24 @@ begin
     end ;
 
     kk := Tab.rowCount ;
-    sx := 'Prenos plošè ' ;
+    sx := 'Prenos ploÂšÃ¨ ' ;
     Progbegin(sx,kk) ;
 
     izap := 1 ;
-    for i := 1 to kk do           // po vseh delovnih nalogin za plošèe
+    for i := 1 to kk do           // po vseh delovnih nalogin za ploÂšÃ¨e
     begin
       // if terminated then exit  ;
       ProgUpdate(sx,kk) ;
 
-       // tehnièno zakljuèene izloèim
+       // tehniÃ¨no zakljuÃ¨ene izloÃ¨im
        statdn := copy(tab.value(i,42),1,4) ;
        if (statdn = 'TEHZ') or (statdn = 'ZAKL') then continue ;
 
-       // izloèim naloge ki ne pripadajo plošèam
+       // izloÃ¨im naloge ki ne pripadajo ploÂšÃ¨am
        kdd := tab.value(i,5) ;
        if (kdd[9] <> '4') and (kdd[9] <> '3') and (kdd[9] <> '2') then continue ;
 
-       potr :=  Round(Tab.value(i,18)) ;      // kolièina na nalogu
+       potr :=  Round(Tab.value(i,18)) ;      // koliÃ¨ina na nalogu
        order := Tab.value(i,1) ;
        dstart := Tab.value(i,14) ;
 
@@ -352,7 +352,7 @@ begin
               exit
             end ;
 
-            // raèunanje donosa
+            // raÃ¨unanje donosa
             yield := 0 ;
             mm := tabs.rowcount ;
             for m := 1 to mm do
@@ -398,11 +398,11 @@ begin
   if Connection.LogOn(0,true) = true then  (* parameter "true" = SilentLogOn *)
   begin
      ni := ADOQuery2.RecordCount ;
-     sx := 'Prenos šamotov ' ;
+     sx := 'Prenos Âšamotov ' ;
      Progbegin(sx,ni) ;
 
      ADOQuery2.First ;
-     while not ADOQuery2.Eof  do      // po vseh delovnih nalogih za plošèe
+     while not ADOQuery2.Eof  do      // po vseh delovnih nalogih za ploÂšÃ¨e
      begin
          mk := 0 ;
          ProgUpdate(sx,ni) ;
@@ -467,7 +467,7 @@ begin
      end;  // konec pregled delovnih nalogov
 
      slist.Sort(@comparesam);
-     Zaloge(1,slist,zlist) ;        // šamoti
+     Zaloge(1,slist,zlist) ;        // Âšamoti
      //zlist.Free ;
      pocisti1(zlist) ;
 
@@ -487,7 +487,7 @@ begin
      pocisti1(zulist) ;
      pocisti2(sulist) ;
 
-     Zaloge(6,solist,zolist) ;          // obroèi
+     Zaloge(6,solist,zolist) ;          // obroÃ¨i
      pocisti1(zolist) ;
      pocisti2(solist) ;
 
@@ -512,7 +512,8 @@ begin
 
  // PostObdelava ;
   if izvedba then dodatek ;
-  label1.Caption := 'Prenos je konèan ' + inttoStr(gettickCount-tt) ;
+  // Keep the same credential source as the rest of the app (PrijavaSAP / DB-backed logic).
+  label1.Caption := 'Prenos je konÃ¨an ' + inttoStr(gettickCount-tt) ;
   Progressbar1.Visible := false ;
   close ;
   //Connection.Logoff ;
@@ -564,7 +565,7 @@ begin
     funct.TABLES.item('PROD_SCHED_RANGE').Value(1,2) := 'EQ' ;
     funct.TABLES.item('PROD_SCHED_RANGE').Value(1,3) := '200' ;       }
 
-    if id = 1  then        // delovni nalogi za plošèe
+    if id = 1  then        // delovni nalogi za ploÂšÃ¨e
     begin
       funct.TABLES.item('PROD_SCHED_RANGE').appendRow.Value('SIGN') := 'I' ;
       funct.TABLES.item('PROD_SCHED_RANGE').Value(1,2) := 'EQ' ;
@@ -574,14 +575,14 @@ begin
       funct.TABLES.item('ORDER_NUMBER_RANGE').Value(1,2) := 'GE' ;
       funct.TABLES.item('ORDER_NUMBER_RANGE').Value(1,3) := deln ;
 
-      // s to omejitvijo definiram plošèe
+      // s to omejitvijo definiram ploÂšÃ¨e
       funct.TABLES.item('MATERIAL_RANGE').appendRow.Value('SIGN') := 'I' ;
       funct.TABLES.item('MATERIAL_RANGE').Value(1,2) := 'EQ' ;
       funct.TABLES.item('MATERIAL_RANGE').Value(1,3) := '000012080000000000' ;
      // funct.TABLES.item('MATERIAL_RANGE').Value(1,4) := '000013789000000000' ;
       funct.TABLES.item('MATERIAL_RANGE').Value(1,4) := '000019789000000000' ;
     end ;
-    if id = 2  then            // delovni nalogi za šamote in sponke
+    if id = 2  then            // delovni nalogi za Âšamote in sponke
     begin
       nn := funct.TABLES.item('MATERIAL_RANGE').rowcount ;
       if deln <> '' then
@@ -597,7 +598,7 @@ begin
     end ;
 
     vredu := true ;
-    if not funct.call then           // èe ni bilo v redu
+    if not funct.call then           // Ã¨e ni bilo v redu
        vredu := false
     else
        tab := funct.TABLES.item('ORDER_HEADER');    // tabela nalogov
@@ -618,7 +619,7 @@ begin
    funct1.exports('NUMBER').value := deln ;
    funct1.exports('ORDER_OBJECTS').value(id) := 'X' ;
    vredu := true ;
-   if not funct1.call then           // èe ni bilo v redu
+   if not funct1.call then           // Ã¨e ni bilo v redu
      vredu := false
    else
      tabc := funct1.TABLES.item(op);
@@ -637,7 +638,7 @@ begin
    funct3.TABLES.item('CONF_RANGE').Value(1,2) := 'EQ' ;
    funct3.TABLES.item('CONF_RANGE').Value(1,3) := conf ;
    vredu := true ;
-   if not funct3.call then           // èe ni bilo v redu
+   if not funct3.call then           // Ã¨e ni bilo v redu
      vredu := false
    else
      tabs := funct3.TABLES.item('CONFIRMATIONS');
@@ -671,7 +672,7 @@ begin
    yie := funct4.imports('CONF_DETAIL').value(31) ;
 end;
 
-// preverim èe je koda izdelka že v listi izdelkov
+// preverim Ã¨e je koda izdelka Âže v listi izdelkov
 Function TFtransfer.Preverisam(mt : string; zlist : Tlist) : boolean;
   var i : integer ;
       bs : boolean ;
@@ -706,7 +707,7 @@ begin
   if zlist.IndexOf(pp) = -1  then zlist.add(pp) ;
 end;
 
-// popravljanje števila potreb v listi kombinacij
+// popravljanje Âštevila potreb v listi kombinacij
 procedure TFtransfer.ZapisSup(mat: string; ix : longint; slist : tlist) ;
   var ii : integer ;
       pp : ^sams ;
@@ -722,7 +723,7 @@ begin
   end;
 end;
 
-// zapis v listo kombinacij izdelka in polizdelka (ni nujno šamot)
+// zapis v listo kombinacij izdelka in polizdelka (ni nujno Âšamot)
 Procedure TFtransfer.Zapissamot(kk,idc,ln : integer ;mt,kodpl,dn,nz : string; ix : longint; var slist: tlist) ;
   var ii : integer ;
       nas : boolean ;
@@ -756,7 +757,7 @@ begin
   end;
 end;
 
-// zapiš šamtov  v listo izdelkov in listo kombinacij
+// zapiÂš Âšamtov  v listo izdelkov in listo kombinacij
 procedure TFtransfer.Obdelajsamot(nzz,mt,kodpl,dn : string; ix,ln : longint; idc : integer; zlist,slist : Tlist) ;
   var nz,statdn,delns,mat : string ;
       kk,k1,k2,m,i : Integer ;
@@ -766,24 +767,24 @@ procedure TFtransfer.Obdelajsamot(nzz,mt,kodpl,dn : string; ix,ln : longint; idc
       fdate : Tdatetime ;
       st_potr,arbid : string;
 begin
-   nz := StringReplace(nzz,'Plo##a #amot','Plošèa šamot',[]) ;
+   nz := StringReplace(nzz,'Plo##a #amot','PloÂšÃ¨a Âšamot',[]) ;
    kk := 4 ;
-   if pos('šamot 220',nz) > 0 then kk := 1  ;
-   if pos('šamot 180',nz) > 0 then kk := 2  ;
-   if pos('šamot 145',nz) > 0 then kk := 3  ;
-   if pos('šamot 80',nz) > 0 then kk := 4   ;
-   if pos('šamot 110',nz) > 0 then kk := 4  ;
-   if pos('šamot 115',nz) > 0 then kk := 4  ;
+   if pos('Âšamot 220',nz) > 0 then kk := 1  ;
+   if pos('Âšamot 180',nz) > 0 then kk := 2  ;
+   if pos('Âšamot 145',nz) > 0 then kk := 3  ;
+   if pos('Âšamot 80',nz) > 0 then kk := 4   ;
+   if pos('Âšamot 110',nz) > 0 then kk := 4  ;
+   if pos('Âšamot 115',nz) > 0 then kk := 4  ;
 
    mat := KodaForm(mt,SL,false) ;
-   // poišèem delovne naloge šamotov
+   // poiÂšÃ¨em delovne naloge Âšamotov
    sapFunctions1.RemoveAll ;
    bsam := preveriSam(mt,zlist) ;
-   // èe šamot še ni bil obdelan
+   // Ã¨e Âšamot Âše ni bil obdelan
    if bsam then
    begin
       tt := GettickCount ;
-      GetProdList(2,mt,dn,taba,vredu) ;   // lista delovnih nalogov za šamot
+      GetProdList(2,mt,dn,taba,vredu) ;   // lista delovnih nalogov za Âšamot
       if taba.rowCount = 0 then GetProdList(2,mt,'',taba,vredu) ;
 
       if not vredu then
@@ -795,7 +796,7 @@ begin
       k1 := Taba.rowCount ;
       yi1 := 0 ;
       yi2 := 0 ;
-      for i := 1 to k1 do       // po vseh nalogih za doloèen šamot
+      for i := 1 to k1 do       // po vseh nalogih za doloÃ¨en Âšamot
       begin
          delns := taba.value(i,1) ;
          try
@@ -804,7 +805,7 @@ begin
             fdate := date - 20
          end;
 
-         // izloèim že zakljuèene
+         // izloÃ¨im Âže zakljuÃ¨ene
          try
            statdn := copy(taba.value(i,42),1,4) ;
          except
@@ -814,14 +815,14 @@ begin
          tt := gettickCount ;
          if i = k1 then obdelajUli(delns,mat,ix,ln,idc,kk) ;
 
-         // preberem potrditve za doloèen nalog
+         // preberem potrditve za doloÃ¨en nalog
          SAPFunctions1.Connection := Idispatch(Connection);
          funct := sapFunctions1.add('ZETA_RFC_READ_AFRU');
          Funct.EXPORTS('dday').VALUE := fdate ;
          Funct.EXPORTS('stnal').VALUE := delns;
          funct.call ;
 
-         // raèunam donose na dveh razliènih operacijah
+         // raÃ¨unam donose na dveh razliÃ¨nih operacijah
          tabs := funct.TABLES.item('IT_AFRU');    // tabela rezultatov
          k2 := Tabs.rowCount ;
          for m := 1 to k2 do
@@ -836,9 +837,9 @@ begin
                if (arbid = '10004720') or (arbid = '10004719') then yi2 := yi2 + yie;
             end;
          end ;
-       end;   // konec pregled nalogov šamotov
+       end;   // konec pregled nalogov Âšamotov
        rz := yi1 - yi2 ;      // razlika donosov dveh operacijah
-       ZapisSk(mat,ix,rz,zlist) ;    // zapis v listo šamotov
+       ZapisSk(mat,ix,rz,zlist) ;    // zapis v listo Âšamotov
     end else ZapisSup(mat,ix,sulist) ;
     ZapisSamot(kk,idc,ln,mat,kodpl,dn,nz,ix,slist) ;   // zapis v listo kombinacij
 end ;
@@ -854,7 +855,7 @@ procedure TFtransfer.ObdelajPolIzd(nzp,mtp,kodpl,dn : string; ix,ln : longint; i
 begin
    sapFunctions1.RemoveAll ;
    bsam := preveriSam(mtp,zplist) ;
-   // èe polizdelek še ni bil obdelan
+   // Ã¨e polizdelek Âše ni bil obdelan
    if bsam then
    begin
       mat := KodaForm(mtp,SL,false) ;
@@ -869,14 +870,14 @@ end ;
 function TFtransfer.TipObroca(var nzz : string) : integer ;
   var kk : integer ;
 begin
-   nzz[5] := 'È' ;
+   nzz[5] := 'Ãˆ' ;
    kk := 4 ;
-   if pos('OBROÈ 220',nzz) > 0 then kk := 1  ;
-   if pos('OBROÈ 180',nzz) > 0 then kk := 2  ;
-   if pos('OBROÈ 145',nzz) > 0 then kk := 3  ;
-   if pos('OBROÈ 80',nzz) > 0 then kk := 4   ;
-   if pos('OBROÈ 110',nzz) > 0 then kk := 4  ;
-   if pos('OBROÈ 115',nzz) > 0 then kk := 4  ;
+   if pos('OBROÃˆ 220',nzz) > 0 then kk := 1  ;
+   if pos('OBROÃˆ 180',nzz) > 0 then kk := 2  ;
+   if pos('OBROÃˆ 145',nzz) > 0 then kk := 3  ;
+   if pos('OBROÃˆ 80',nzz) > 0 then kk := 4   ;
+   if pos('OBROÃˆ 110',nzz) > 0 then kk := 4  ;
+   if pos('OBROÃˆ 115',nzz) > 0 then kk := 4  ;
    if pos('-4',nzz)  > 0 then kk := 4 + kk ;
    result := kk ;
 end;
@@ -901,7 +902,7 @@ begin
     tx := intTostr(opr) + ' Prenos zalog ' + IntToStr(opr) + ' ' ;
     ProgBegin(tx,zlist.Count) ;
 
-    // raèunanje zalog polizdelka
+    // raÃ¨unanje zalog polizdelka
     for ii := 0 to zlist.Count-1 do    // po vseh kodah polizdelka
     begin
       ProgUpdate('A'+tx, zlist.Count) ;
@@ -911,7 +912,7 @@ begin
       pp^.zal := ZalogeZaMat(mat)  ;
     end;
 
-    for jj  := 0 to zlist.count-1 do     // še enkrat po polizdelkih
+    for jj  := 0 to zlist.count-1 do     // Âše enkrat po polizdelkih
     begin
       pp := zlist[jj] ;
       dn := pp^.mat ;
@@ -923,7 +924,7 @@ begin
         if p1^.mat = dn then
         begin
           rx := p1.kolic - pp^.zal ;
-          if rx > 0 then           // èe so potrebe veèje od zaloge
+          if rx > 0 then           // Ã¨e so potrebe veÃ¨je od zaloge
           begin
             p1^.zal := pp^.zal ;
             pp^.zal := 0 ;
@@ -937,7 +938,7 @@ begin
               pp^.pec := pp^.pec - rx ;
             end;
           end else
-          begin                                // zaloge so veèje od potreb
+          begin                                // zaloge so veÃ¨je od potreb
             p1.zal :=  p1^.kolic;
             pp^.zal := pp^.zal- p1^.kolic
           end;
@@ -948,9 +949,9 @@ begin
 
   ProgBegin(tx,slist.Count) ;
   case opr of
-    1 :                                            // šamoti
+    1 :                                            // Âšamoti
     begin
-      tx := 'Zapis šamotov ' ;
+      tx := 'Zapis Âšamotov ' ;
       tt := GettickCount ;
 
       ADOQuery4.SQL.Clear ;
@@ -973,11 +974,11 @@ begin
           AdoQuery3.FieldByname('vsota').value := 0 ;
           AdoQuery3.Post ;
         except
-          //SHowMessage('Problem pri raèunanju vsote šamotov')
+          //SHowMessage('Problem pri raÃ¨unanju vsote Âšamotov')
         end;
         AdoQuery3.Next ;
       end;
-      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah ploÂšÃ¨e in Âšamota
       begin
         ProgUpdate(tx,slist.count) ;
         p1 := slist[ii] ;
@@ -1001,7 +1002,7 @@ begin
             ADOQuery3.Post ;
           except
            // on e: exception do Showmessage(E.message) ;
-            // SHowMessage('Problem pri raèunanju vsote šamotov')
+            // SHowMessage('Problem pri raÃ¨unanju vsote Âšamotov')
           end;
         end;
       end;
@@ -1018,7 +1019,7 @@ begin
       ADOQuery7.SQL.Clear ;
       ADOquery7.SQL.add('select * from protekt') ;
       AdoQuery7.Open;
-      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in šamota
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah ploÂšÃ¨e in Âšamota
       begin
         ProgUpdate(tx,slist.Count) ;
         p1 := slist[ii] ;
@@ -1037,7 +1038,7 @@ begin
       ADOQuery8.SQL.Clear ;
       ADOquery8.SQL.add('select * from sponke') ;
       AdoQuery8.Open;
-      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in sponk
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah ploÂšÃ¨e in sponk
       begin
         ProgUpdate(tx,slist.Count) ;
         p1 := slist[ii] ;
@@ -1057,7 +1058,7 @@ begin
       ADOQuery9.SQL.Clear ;
       ADOquery9.SQL.add('select * from ulitki') ;
       AdoQuery9.Open;
-      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in ulitkov
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah ploÂšÃ¨e in ulitkov
       begin
         ProgUpdate(tx,slist.Count) ;
         p1 := slist[ii] ;
@@ -1068,7 +1069,7 @@ begin
       AdoQuery9.Close ;
     end;
 
-    6 :                                                 // obroèi
+    6 :                                                 // obroÃ¨i
     begin
       ADOQuery8.SQL.Clear ;
       ADOquery8.SQL.add('delete from obroci') ;
@@ -1078,7 +1079,7 @@ begin
       ADOquery8.SQL.add('select * from obroci') ;
       AdoQuery8.Open;
       dd := Date ;
-      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah plošèe in obroèev
+      for ii  := 0 to slist.count-1 do        // po vseh kombinacijah ploÂšÃ¨e in obroÃ¨ev
       begin
         ProgUpdate(tx,slist.Count) ;
         p1 := slist[ii] ;
@@ -1118,7 +1119,7 @@ begin
 end ;
 
 
-// obravnava sestavnih delov šamota - ulitki in špirale
+// obravnava sestavnih delov Âšamota - ulitki in Âšpirale
 procedure TFtransfer.obdelajUli(delns,mt: string; ix,ln : longint; idc,kk : integer) ;
   var vredu,ns : boolean ;
       tabc : variant ;
@@ -1133,7 +1134,7 @@ begin
  // showmessage('a'+intTostr(Gettickcount -tt)) ;
   if not vredu then
   begin
-     showMessage('Napaka bri branju enega proizvodnjega naloga za šamot') ;
+     showMessage('Napaka bri branju enega proizvodnjega naloga za Âšamot') ;
      exit
   end ;
   nzu := '' ;
@@ -1159,7 +1160,7 @@ end;
 
 
 
-// izraèun in zapis zalog za špirale
+// izraÃ¨un in zapis zalog za Âšpirale
 Procedure TFtransfer.zaloge_sp(slist,svlist: Tlist) ;
 var
   i,nas,k: Integer;
@@ -1180,7 +1181,7 @@ var
         mater : string ;
         ids : integer ;
   begin
-     // ugotovim na katerem stroju naj bib bila špirala narejena
+     // ugotovim na katerem stroju naj bib bila Âšpirala narejena
      GetProdList(2,kd,dn,taba,vredu) ;
      if taba.rowCount = 0 then GetProdList(2,kd,'',taba,vredu) ;
      kk :=  taba.Rowcount ;
@@ -1229,7 +1230,7 @@ begin
   ADOquery10.SQL.add('select * from spirale') ;
   AdoQuery10.Open;
   tx := 'Prenos zalog A ' ;
-  // zaloge špirale zapišem v listo špiral
+  // zaloge Âšpirale zapiÂšem v listo Âšpiral
   for i := 1 to svlist.count-1 do
   begin
      pp := svlist[i] ;
@@ -1238,14 +1239,14 @@ begin
 
   ProgBegin(tx,slist.Count) ;
   Fstroji.Nanul ;
-  for i := 0 to slist.count-1 do     // po vseh kombinacijah plošèe in šamota
+  for i := 0 to slist.count-1 do     // po vseh kombinacijah ploÂšÃ¨e in Âšamota
   begin
      ProgUpdate(tx,slist.Count) ;
      p1 := slist[i] ;
      kdsm := p1^.mat ;
      dn := p1^.nalog ;
      kl := p1^.kolic - p1^.zal;
-     for k := 0 to svlist.count-1 do     // po vseh kombinacijah šamota in špirale
+     for k := 0 to svlist.count-1 do     // po vseh kombinacijah Âšamota in Âšpirale
      begin
         pp := svlist[k] ;
         if kdsm = pp^.mat_pl then
@@ -1316,7 +1317,7 @@ begin
     AdoQuery2.Open;
     AdoQuery2.First;
 
-    while not AdoQuery2.eof do     // po vseh nalogih za plošèe
+    while not AdoQuery2.eof do     // po vseh nalogih za ploÂšÃ¨e
     begin
       tt := GetTickCount ;
       xx := Round(AdoQuery2kolicina.value) ;
@@ -1343,13 +1344,13 @@ begin
       kp := kp -  xx ;
       AdoQuery2.Next ;
     end;
-    // vpišem vsoto za en trak
+    // vpiÂšem vsoto za en trak
     try
       ADOTable1.edit ;
       ADOTable1vsota.value := ss ;
       ADOTable1.post ;
     except
-      Showmessage('problem pri raèunanju vsote - plošèe') ;
+      Showmessage('problem pri raÃ¨unanju vsote - ploÂšÃ¨e') ;
     end ;
    // SHowmessage(intTostr(kp) + '/' + intTostr(xx)) ;
     ADOTable1.next ;
@@ -1685,7 +1686,7 @@ begin
     if vsajena then
     begin
       bk := adoquery10.GetBookmark ;
-      tx := 'Koliè. ' + datetostr(dat) +'/' + Inttostr(izm) ;
+      tx := 'KoliÃ¨. ' + datetostr(dat) +'/' + Inttostr(izm) ;
       ZapisSpi(10,0,tx,'','',kol,zal,raz,0) ;
       Adoquery10.edit ;
       Adoquery10.fieldbyname('dan').Value := dat ; ;
@@ -1698,7 +1699,7 @@ begin
     izm := Adoquery10.FieldByName('izmena').asinteger ;
   end;
 
-  //ShowMessage('Konèal sem') ;
+  //ShowMessage('KonÃ¨al sem') ;
 end;
 
 procedure TFtransfer.Izmcas(kdp : string; dd : TdateTime; izm : integer) ;
@@ -1719,11 +1720,11 @@ begin
          AdoQuery4.FieldByName('izmena').value := izm ;
          AdoQuery4.post ;
        except
-         ShowMessage('Zapis datuma pri šamotih') ;
+         ShowMessage('Zapis datuma pri Âšamotih') ;
        end;
     end;
 
-    // špirale
+    // Âšpirale
 
     AdoQuery10.last ;
     while not AdoQuery10.bof do
@@ -1740,7 +1741,7 @@ begin
              AdoQuery10.post ;
            end ;
          except
-           ShowMessage('Zapis datuma pri šamotih') ;
+           ShowMessage('Zapis datuma pri Âšamotih') ;
          end;
        end;
        AdoQuery10.Prior ;
@@ -1762,7 +1763,7 @@ begin
              AdoQuery9.post ;
            end;
          except
-           ShowMessage('Zapis datuma pri šamotih') ;
+           ShowMessage('Zapis datuma pri Âšamotih') ;
          end;
        end;
         AdoQuery9.Prior ;
@@ -1782,7 +1783,7 @@ begin
            AdoQuery7.FieldByName('izmena').value := izm ;
            AdoQuery7.post ;
          except
-           ShowMessage('Zapis datuma pri šamotih') ;
+           ShowMessage('Zapis datuma pri Âšamotih') ;
          end;
      end;
      AdoQuery7.Next ;
@@ -1799,7 +1800,7 @@ begin
          AdoQuery8.FieldByName('izmena').value := izm ;
          AdoQuery8.post ;
        except
-         ShowMessage('Zapis datuma pri šamotih') ;
+         ShowMessage('Zapis datuma pri Âšamotih') ;
        end;
      end;
      AdoQuery8.Next ;
@@ -1816,7 +1817,7 @@ begin
          AdoQuery6.FieldByName('izmena').value := izm ;
          AdoQuery6.post ;
        except
-         ShowMessage('Zapis datuma pri šamotih') ;
+         ShowMessage('Zapis datuma pri Âšamotih') ;
        end;
      end;
      AdoQuery6.Next ;
