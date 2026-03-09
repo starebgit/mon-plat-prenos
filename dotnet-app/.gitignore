@@ -1,0 +1,5 @@
+bin/
+obj/
+.vs/
+output/
+MonPlatPrenos.Worker/lib/*.dll
