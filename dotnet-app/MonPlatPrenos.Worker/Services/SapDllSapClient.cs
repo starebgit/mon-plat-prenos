@@ -82,7 +82,41 @@ public sealed class SapDllSapClient : ISapClient
     }
 
     public Task<IReadOnlyList<SapOperation>> GetOperationsAsync(string orderNumber, CancellationToken cancellationToken)
-        => throw new NotImplementedException("sapnco.dll/sapnco_utils.dll loaded. Next step: implement calls and mapping for operations.");
+    {
+        var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
+        SetImport(function, "NUMBER", orderNumber);
+        SetOrderObjectsFlag(function, "OPERATION");
+
+        InvokeFunction(function);
+
+        var operationTable = GetTable(function, "OPERATION");
+        var results = new List<SapOperation>();
+
+        foreach (var row in EnumerateRows(operationTable))
+        {
+            var confirmation = GetFirstString(row, "CONF_NO", "CONFIRMATION", "RUECK");
+            var operationCode = GetFirstString(row, "OPR", "ACTIVITY", "LTXA1");
+            var stepCode = GetFirstString(row, "OPER", "VORNR", "SUB_ACTIVITY");
+            var confirmableQty = ParseInt(GetFirstString(row, "QUANTITY", "CONFIRMABLE_QTY", "BMSCH"));
+
+            if (string.IsNullOrWhiteSpace(operationCode))
+            {
+                continue;
+            }
+
+            results.Add(new SapOperation(
+                orderNumber.Trim(),
+                confirmation.Trim(),
+                operationCode.Trim(),
+                confirmableQty,
+                stepCode.Trim()));
+        }
+
+        _logger.LogInformation("BAPI_PRODORD_GET_DETAIL returned {Count} OPERATION rows for order {OrderNumber}.", results.Count, orderNumber);
+        _logger.LogInformation("Mapped OPERATION fields used: CONF_NO/CONFIRMATION, OPR/ACTIVITY, OPER/VORNR, QUANTITY/CONFIRMABLE_QTY.");
+
+        return Task.FromResult<IReadOnlyList<SapOperation>>(results);
+    }
 
     public Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken)
         => throw new NotImplementedException("sapnco.dll/sapnco_utils.dll loaded. Next step: implement calls and mapping for confirmations.");
@@ -132,6 +166,27 @@ public sealed class SapDllSapClient : ISapClient
         {
             SetField(currentRow, "HIGH", high);
         }
+    }
+
+    private static void SetImport(object function, string importName, string value)
+    {
+        var setValue = function.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) })
+                       ?? throw new InvalidOperationException("Could not find function.SetValue(string, object).");
+        setValue.Invoke(function, new object[] { importName, value });
+    }
+
+    private static void SetOrderObjectsFlag(object function, string fieldName)
+    {
+        var getStructure = function.GetType().GetMethod("GetStructure", new[] { typeof(string) })
+                          ?? throw new InvalidOperationException("Could not find function.GetStructure(string).");
+
+        var structure = getStructure.Invoke(function, new object[] { "ORDER_OBJECTS" })
+                       ?? throw new InvalidOperationException("ORDER_OBJECTS structure is null.");
+
+        var setValue = structure.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) })
+                       ?? throw new InvalidOperationException("Could not find structure.SetValue(string, object).");
+
+        setValue.Invoke(structure, new object[] { fieldName, "X" });
     }
 
     private static object GetTable(object function, string tableName)
