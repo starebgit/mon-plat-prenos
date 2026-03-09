@@ -65,4 +65,17 @@ public sealed class MockSapClient : ISapClient
 
         return Task.FromResult(result);
     }
+
+    public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersByMaterialAsync(string plant, string material, string? orderFrom, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<SapOrderHeader> result =
+        [
+            new("000006945920", material, "REL", 120, DateTime.Today, "TRAK-01", "200", plant)
+        ];
+
+        return Task.FromResult(result);
+    }
+
+    public Task<int> GetAfruYieldDeltaAsync(string orderNumber, DateTime fromDate, CancellationToken cancellationToken)
+        => Task.FromResult(12);
 }

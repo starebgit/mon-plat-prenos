@@ -28,6 +28,7 @@ public sealed class PrenosJob(
 
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
+        var semiFinished = new List<SemiFinishedTrace>();
 
         foreach (var order in orders)
         {
@@ -85,19 +86,25 @@ public sealed class PrenosJob(
                         missingQty,
                         DateTime.UtcNow));
 
+                    if (IsLegacySemiFinishedCategory(rule.Name))
+                    {
+                        await ProcessSemiFinishedAsync(order, component, rule.Name, semiFinished, unified, cancellationToken);
+                    }
+
                     break;
                 }
             }
         }
 
-        await WriteOutputAsync(plateDemands, unified, cancellationToken);
+        await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
 
-        logger.LogInformation("Finished prenos job. Plate records: {PlateCount}, Unified items: {UnifiedCount}", plateDemands.Count, unified.Count);
+        logger.LogInformation("Finished prenos job. Plate records: {PlateCount}, Unified items: {UnifiedCount}, Semi-finished traces: {SemiCount}", plateDemands.Count, unified.Count, semiFinished.Count);
     }
 
     private async Task WriteOutputAsync(
         IReadOnlyList<PlateDemandRecord> plateDemands,
         IReadOnlyList<UnifiedItem> unified,
+        IReadOnlyList<SemiFinishedTrace> semiFinished,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_options.OutputDirectory);
@@ -108,6 +115,67 @@ public sealed class PrenosJob(
 
         await File.WriteAllTextAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         await File.WriteAllTextAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+
+        if (_options.EnableDebugJson)
+        {
+            var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
+            await File.WriteAllTextAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        }
+    }
+
+    private async Task ProcessSemiFinishedAsync(
+        SapOrderHeader plateOrder,
+        SapComponent matchedComponent,
+        string category,
+        ICollection<SemiFinishedTrace> semiFinished,
+        ICollection<UnifiedItem> unified,
+        CancellationToken cancellationToken)
+    {
+        var subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
+            plateOrder.Plant,
+            matchedComponent.Material,
+            plateOrder.OrderNumber,
+            cancellationToken);
+
+        if (subOrders.Count == 0)
+        {
+            subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
+                plateOrder.Plant,
+                matchedComponent.Material,
+                null,
+                cancellationToken);
+        }
+
+        foreach (var subOrder in subOrders)
+        {
+            var afruDelta = await sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken);
+
+            semiFinished.Add(new SemiFinishedTrace(
+                plateOrder.OrderNumber,
+                plateOrder.Material,
+                category,
+                matchedComponent.Material,
+                subOrder.OrderNumber,
+                afruDelta,
+                DateTime.UtcNow));
+
+            unified.Add(new UnifiedItem(
+                plateOrder.OrderNumber,
+                plateOrder.Material,
+                matchedComponent.Material,
+                $"AFRU delta for {subOrder.OrderNumber}",
+                $"{category}_AFRU",
+                afruDelta,
+                DateTime.UtcNow));
+        }
+    }
+
+    private static bool IsLegacySemiFinishedCategory(string category)
+    {
+        return category.Equals("Samot", StringComparison.OrdinalIgnoreCase)
+               || category.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
+               || category.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
+               || category.Equals("Obroc", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ParseTrack(string trackCode)

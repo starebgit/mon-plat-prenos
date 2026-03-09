@@ -10,6 +10,7 @@ public sealed class PrenosOptions
     public List<string> OperationCodes { get; set; } = ["PP04", "PP14", "PP02", "PP10"];
     public List<TermRule> DefaultTerms { get; set; } = new();
     public List<TermRule> ExtraTerms { get; set; } = new();
+    public bool EnableDebugJson { get; set; } = true;
     public SapIntegrationOptions Sap { get; set; } = new();
 }
 

@@ -17,4 +17,12 @@ public interface ISapClient
     Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SapComponent>> GetComponentsAsync(string orderNumber, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersByMaterialAsync(
+        string plant,
+        string material,
+        string? orderFrom,
+        CancellationToken cancellationToken);
+
+    Task<int> GetAfruYieldDeltaAsync(string orderNumber, DateTime fromDate, CancellationToken cancellationToken);
 }

@@ -14,6 +14,7 @@ This is a new .NET worker app that mirrors the current Delphi behavior and is re
 - JSON output files in `output/`:
   - `plates-*.json`
   - `unified-*.json`
+  - `semi-finished-*.json` (debug trace for AFRU/semi-finished flow)
 
 ## Run
 
@@ -27,6 +28,9 @@ dotnet run
 ```
 
 ## Configure new terms
+
+`Prenos:EnableDebugJson` controls whether semi-finished debug traces are written to JSON.
+
 
 Edit `appsettings.json`:
 

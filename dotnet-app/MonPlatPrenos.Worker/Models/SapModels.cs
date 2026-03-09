@@ -42,3 +42,12 @@ public sealed record UnifiedItem(
     string Category,
     int RequiredQty,
     DateTime CapturedAtUtc);
+
+public sealed record SemiFinishedTrace(
+    string PlateOrder,
+    string PlateMaterial,
+    string Category,
+    string SemiMaterial,
+    string SemiOrder,
+    int AfruYieldDelta,
+    DateTime CapturedAtUtc);

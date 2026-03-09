@@ -187,6 +187,101 @@ public sealed class SapDllSapClient : ISapClient
         return Task.FromResult<IReadOnlyList<SapComponent>>(results);
     }
 
+
+    public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersByMaterialAsync(string plant, string material, string? orderFrom, CancellationToken cancellationToken)
+    {
+        var function = CreateFunction("BAPI_PRODORD_GET_LIST");
+        FillRange(function, "PRODPLANT_RANGE", "EQ", plant);
+        FillRange(function, "MATERIAL_RANGE", "EQ", material);
+        if (!string.IsNullOrWhiteSpace(orderFrom))
+        {
+            FillRange(function, "ORDER_NUMBER_RANGE", "GE", orderFrom);
+        }
+
+        InvokeFunction(function);
+
+        var orderHeader = GetTable(function, "ORDER_HEADER");
+        var results = new List<SapOrderHeader>();
+
+        foreach (var row in EnumerateRows(orderHeader))
+        {
+            var orderNumber = GetFirstString(row, "ORDER_NUMBER", "AUFNR");
+            if (string.IsNullOrWhiteSpace(orderNumber))
+            {
+                continue;
+            }
+
+            results.Add(new SapOrderHeader(
+                orderNumber.Trim(),
+                GetFirstString(row, "MATERIAL", "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR").Trim(),
+                GetFirstString(row, "SYSTEM_STATUS", "SYS_STATUS", "STAT").Trim(),
+                ParseInt(GetFirstString(row, "TARGET_QUANTITY", "TOTAL_PLORD_QTY", "GAMNG")),
+                ParseDate(GetFirstString(row, "START_DATE", "BASIC_START_DATE", "GSTRP")),
+                GetFirstString(row, "WORK_CENTER", "WORK_CENT", "ARBPL").Trim(),
+                GetFirstString(row, "PROD_SCHED", "PROD_SCHEDULER", "FEVOR").Trim(),
+                GetFirstString(row, "PRODUCTION_PLANT", "PLANT", "WERKS").Trim()));
+        }
+
+        return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
+    }
+
+    public Task<int> GetAfruYieldDeltaAsync(string orderNumber, DateTime fromDate, CancellationToken cancellationToken)
+    {
+        var function = CreateFunction("ZETA_RFC_READ_AFRU");
+        SetImport(function, "dday", fromDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+        SetImport(function, "stnal", orderNumber);
+        InvokeFunction(function);
+
+        var table = GetTable(function, "IT_AFRU");
+        var yi1 = 0;
+        var yi2 = 0;
+
+        foreach (var row in EnumerateRows(table))
+        {
+            var arbid = GetFirstString(row, "ARBID", "WORK_CENTER_ID");
+            if (string.IsNullOrWhiteSpace(arbid))
+            {
+                arbid = GetStringByIndex(row, 9);
+            }
+
+            var arbidNum = DigitsOnly(arbid);
+            if (arbidNum < 10004712 || arbidNum > 10004720)
+            {
+                continue;
+            }
+
+            var yieString = GetFirstString(row, "YIELD", "LMNGA");
+            if (string.IsNullOrWhiteSpace(yieString))
+            {
+                yieString = GetStringByIndex(row, 38);
+            }
+
+            var yie = ParseInt(yieString);
+            var reversed = GetFirstString(row, "REVERSED", "STOKZ");
+            if (string.IsNullOrWhiteSpace(reversed))
+            {
+                reversed = GetStringByIndex(row, 95);
+            }
+
+            if (string.Equals(reversed, "X", StringComparison.OrdinalIgnoreCase))
+            {
+                yie = -yie;
+            }
+
+            if (arbidNum >= 10004712 && arbidNum <= 10004718)
+            {
+                yi1 += yie;
+            }
+
+            if (arbidNum is 10004719 or 10004720)
+            {
+                yi2 += yie;
+            }
+        }
+
+        return Task.FromResult(yi1 - yi2);
+    }
+
     private object CreateFunction(string functionName)
     {
         var destination = GetDestination();
@@ -339,6 +434,42 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         return string.Empty;
+    }
+
+
+    private static string GetStringByIndex(object row, int index)
+    {
+        try
+        {
+            var getStringByIndex = row.GetType().GetMethod("GetString", new[] { typeof(int) });
+            if (getStringByIndex is not null)
+            {
+                return Convert.ToString(getStringByIndex.Invoke(row, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
+            }
+
+            var getValueByIndex = row.GetType().GetMethod("GetValue", new[] { typeof(int) });
+            if (getValueByIndex is not null)
+            {
+                return Convert.ToString(getValueByIndex.Invoke(row, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
+            }
+        }
+        catch
+        {
+            return string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static int DigitsOnly(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return 0;
+        }
+
+        var digits = new string(input.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var parsed) ? parsed : 0;
     }
 
     private static int ParseInt(string input)
