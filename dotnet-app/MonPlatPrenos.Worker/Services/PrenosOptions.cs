@@ -10,6 +10,14 @@ public sealed class PrenosOptions
     public List<string> OperationCodes { get; set; } = ["PP04", "PP14", "PP02", "PP10"];
     public List<TermRule> DefaultTerms { get; set; } = new();
     public List<TermRule> ExtraTerms { get; set; } = new();
+    public SapIntegrationOptions Sap { get; set; } = new();
+}
+
+public sealed class SapIntegrationOptions
+{
+    public bool UseMock { get; set; } = true;
+    public string SapDllPath { get; set; } = "lib/sap.dll";
+    public string SaUtilsDllPath { get; set; } = "lib/sa_utils.dll";
 }
 
 public sealed class TermRule
