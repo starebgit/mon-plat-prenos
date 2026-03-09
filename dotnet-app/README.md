@@ -1,6 +1,6 @@
 # MonPlatPrenos .NET Worker
 
-This is a new .NET worker app that mirrors the current Delphi behavior and is ready for extension with extra term rules.
+This is a .NET 8 worker app that mirrors the current Delphi behavior and is ready for extension with extra term rules.
 
 ## What is already implemented
 
@@ -18,6 +18,8 @@ This is a new .NET worker app that mirrors the current Delphi behavior and is re
 
 ## Run
 
+Runtime alignment: `net8.0` worker + `sap.dll` / `sa_utils.dll` paths from `appsettings.json`.
+
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
 # one-time run for testing:
@@ -30,6 +32,7 @@ dotnet run
 ## Configure new terms
 
 `Prenos:EnableDebugJson` controls whether semi-finished debug traces are written to JSON.
+`Prenos:EnableDebugTextDump` controls writing a text dump (`prenos-debug-*.txt`) for manual verification.
 
 
 Edit `appsettings.json`:
@@ -124,3 +127,19 @@ dotnet-app/MonPlatPrenos.Worker/lib/sa_utils.dll
   - `GetComponentsAsync`
 
 Map results into records in `Models/SapModels.cs`.
+
+
+## Debug button runner (no DB writes)
+
+A Windows Forms debug app is included: `MonPlatPrenos.DebugRunner`.
+
+- Open solution `MonPlatPrenos.sln`
+- Set startup project to `MonPlatPrenos.DebugRunner`
+- Click **Run Prenos** button
+- It executes the same `PrenosJob` and writes:
+  - `plates-*.json`
+  - `unified-*.json`
+  - `semi-finished-*.json`
+  - `prenos-debug-*.txt`
+
+The form displays the generated debug text dump, so you can validate parity before any DB writing stage.

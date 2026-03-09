@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using MonPlatPrenos.Worker.Models;
 using Microsoft.Extensions.Options;
@@ -86,9 +87,15 @@ public sealed class PrenosJob(
                         missingQty,
                         DateTime.UtcNow));
 
-                    if (IsLegacySemiFinishedCategory(rule.Name))
+                    if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ProcessSemiFinishedAsync(order, component, rule.Name, semiFinished, unified, cancellationToken);
+                        await ObdelajSamotAsync(order, component, semiFinished, unified, cancellationToken);
+                    }
+                    else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
+                             || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
+                             || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await ObdelajPolIzdAsync(order, component, rule.Name, semiFinished, unified, cancellationToken, depth: 0);
                     }
 
                     break;
@@ -99,6 +106,117 @@ public sealed class PrenosJob(
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
 
         logger.LogInformation("Finished prenos job. Plate records: {PlateCount}, Unified items: {UnifiedCount}, Semi-finished traces: {SemiCount}", plateDemands.Count, unified.Count, semiFinished.Count);
+    }
+
+    private async Task ObdelajSamotAsync(
+        SapOrderHeader plateOrder,
+        SapComponent samotComponent,
+        ICollection<SemiFinishedTrace> semiFinished,
+        ICollection<UnifiedItem> unified,
+        CancellationToken cancellationToken)
+    {
+        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, cancellationToken, depth: 0);
+
+        foreach (var samotOrder in samotOrders)
+        {
+            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, cancellationToken);
+        }
+    }
+
+    private async Task<IReadOnlyList<SapOrderHeader>> ObdelajPolIzdAsync(
+        SapOrderHeader plateOrder,
+        SapComponent semiComponent,
+        string category,
+        ICollection<SemiFinishedTrace> semiFinished,
+        ICollection<UnifiedItem> unified,
+        CancellationToken cancellationToken,
+        int depth)
+    {
+        if (depth > 2)
+        {
+            return [];
+        }
+
+        var subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
+            plateOrder.Plant,
+            semiComponent.Material,
+            plateOrder.OrderNumber,
+            cancellationToken);
+
+        if (subOrders.Count == 0)
+        {
+            subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
+                plateOrder.Plant,
+                semiComponent.Material,
+                null,
+                cancellationToken);
+        }
+
+        foreach (var subOrder in subOrders)
+        {
+            var afruDelta = await sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken);
+
+            semiFinished.Add(new SemiFinishedTrace(
+                plateOrder.OrderNumber,
+                plateOrder.Material,
+                category,
+                semiComponent.Material,
+                subOrder.OrderNumber,
+                afruDelta,
+                DateTime.UtcNow));
+
+            unified.Add(new UnifiedItem(
+                plateOrder.OrderNumber,
+                plateOrder.Material,
+                semiComponent.Material,
+                $"AFRU delta for {subOrder.OrderNumber}",
+                $"{category}_AFRU",
+                afruDelta,
+                DateTime.UtcNow));
+        }
+
+        return subOrders;
+    }
+
+    private async Task ObdelajUliAsync(
+        SapOrderHeader plateOrder,
+        SapComponent samotComponent,
+        SapOrderHeader samotOrder,
+        ICollection<SemiFinishedTrace> semiFinished,
+        ICollection<UnifiedItem> unified,
+        CancellationToken cancellationToken)
+    {
+        var components = await sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken);
+
+        foreach (var cmp in components)
+        {
+            if (cmp.Description.Contains("ULITEK", StringComparison.OrdinalIgnoreCase))
+            {
+                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, cancellationToken, depth: 1);
+                continue;
+            }
+
+            if (cmp.Description.Contains("SPIRALA", StringComparison.OrdinalIgnoreCase))
+            {
+                semiFinished.Add(new SemiFinishedTrace(
+                    plateOrder.OrderNumber,
+                    plateOrder.Material,
+                    "Spirala",
+                    cmp.Material,
+                    samotOrder.OrderNumber,
+                    0,
+                    DateTime.UtcNow));
+
+                unified.Add(new UnifiedItem(
+                    plateOrder.OrderNumber,
+                    plateOrder.Material,
+                    cmp.Material,
+                    cmp.Description,
+                    "Spirala",
+                    0,
+                    DateTime.UtcNow));
+            }
+        }
     }
 
     private async Task WriteOutputAsync(
@@ -121,61 +239,33 @@ public sealed class PrenosJob(
             var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
             await File.WriteAllTextAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         }
-    }
 
-    private async Task ProcessSemiFinishedAsync(
-        SapOrderHeader plateOrder,
-        SapComponent matchedComponent,
-        string category,
-        ICollection<SemiFinishedTrace> semiFinished,
-        ICollection<UnifiedItem> unified,
-        CancellationToken cancellationToken)
-    {
-        var subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
-            plateOrder.Plant,
-            matchedComponent.Material,
-            plateOrder.OrderNumber,
-            cancellationToken);
-
-        if (subOrders.Count == 0)
+        if (_options.EnableDebugTextDump)
         {
-            subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
-                plateOrder.Plant,
-                matchedComponent.Material,
-                null,
-                cancellationToken);
+            var textPath = Path.Combine(_options.OutputDirectory, $"prenos-debug-{stamp}.txt");
+            var sb = new StringBuilder();
+            sb.AppendLine("=== PLATES ===");
+            foreach (var p in plateDemands)
+            {
+                sb.AppendLine($"{p.OrderNumber};{p.Material};Q={p.Quantity};Track={p.Track};Start={p.StartDate:yyyy-MM-dd}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("=== UNIFIED ===");
+            foreach (var u in unified)
+            {
+                sb.AppendLine($"{u.OrderNumber};{u.Category};{u.ComponentMaterial};Req={u.RequiredQty};{u.ComponentDescription}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("=== SEMI-FINISHED ===");
+            foreach (var s in semiFinished)
+            {
+                sb.AppendLine($"{s.PlateOrder};{s.Category};Semi={s.SemiMaterial};Order={s.SemiOrder};AFRU={s.AfruYieldDelta}");
+            }
+
+            await File.WriteAllTextAsync(textPath, sb.ToString(), cancellationToken);
         }
-
-        foreach (var subOrder in subOrders)
-        {
-            var afruDelta = await sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken);
-
-            semiFinished.Add(new SemiFinishedTrace(
-                plateOrder.OrderNumber,
-                plateOrder.Material,
-                category,
-                matchedComponent.Material,
-                subOrder.OrderNumber,
-                afruDelta,
-                DateTime.UtcNow));
-
-            unified.Add(new UnifiedItem(
-                plateOrder.OrderNumber,
-                plateOrder.Material,
-                matchedComponent.Material,
-                $"AFRU delta for {subOrder.OrderNumber}",
-                $"{category}_AFRU",
-                afruDelta,
-                DateTime.UtcNow));
-        }
-    }
-
-    private static bool IsLegacySemiFinishedCategory(string category)
-    {
-        return category.Equals("Samot", StringComparison.OrdinalIgnoreCase)
-               || category.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
-               || category.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
-               || category.Equals("Obroc", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ParseTrack(string trackCode)
