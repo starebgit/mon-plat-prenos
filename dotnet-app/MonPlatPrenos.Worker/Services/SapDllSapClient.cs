@@ -119,10 +119,73 @@ public sealed class SapDllSapClient : ISapClient
     }
 
     public Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken)
-        => throw new NotImplementedException("sapnco.dll/sapnco_utils.dll loaded. Next step: implement calls and mapping for confirmations.");
+    {
+        var listFunction = CreateFunction("BAPI_PRODORDCONF_GETLIST");
+        FillRange(listFunction, "ORDER_RANGE", "EQ", orderNumber);
+        FillRange(listFunction, "CONF_RANGE", "EQ", confirmation);
+        InvokeFunction(listFunction);
+
+        var confirmationsTable = GetTable(listFunction, "CONFIRMATIONS");
+        var results = new List<SapConfirmation>();
+
+        foreach (var row in EnumerateRows(confirmationsTable))
+        {
+            var confNo = GetFirstString(row, "CONF_NO", "CONFIRMATION", "RUECK");
+            var confCounter = GetFirstString(row, "CONF_CNT", "CONFIRMATION_COUNTER", "RMZHL");
+            if (string.IsNullOrWhiteSpace(confNo) || string.IsNullOrWhiteSpace(confCounter))
+            {
+                continue;
+            }
+
+            var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
+            SetImport(detailFunction, "CONFIRMATION", confNo);
+            SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
+            InvokeFunction(detailFunction);
+
+            var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
+            var yield = ParseInt(GetFirstString(confDetail, "YIELD", "CONFIRMED_YIELD", "LMNGA"));
+
+            results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
+        }
+
+        _logger.LogInformation("BAPI_PRODORDCONF_GETLIST/GETDETAIL returned {Count} confirmations for order {OrderNumber}, confirmation {Confirmation}.", results.Count, orderNumber, confirmation);
+        _logger.LogInformation("Mapped CONFIRMATIONS/CONF_DETAIL fields used: CONF_NO/CONFIRMATION, CONF_CNT/CONFIRMATION_COUNTER, YIELD.");
+
+        return Task.FromResult<IReadOnlyList<SapConfirmation>>(results);
+    }
 
     public Task<IReadOnlyList<SapComponent>> GetComponentsAsync(string orderNumber, CancellationToken cancellationToken)
-        => throw new NotImplementedException("sapnco.dll/sapnco_utils.dll loaded. Next step: implement calls and mapping for components.");
+    {
+        var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
+        SetImport(function, "NUMBER", orderNumber);
+        SetOrderObjectsFlag(function, "COMPONENT");
+
+        InvokeFunction(function);
+
+        var componentTable = GetTable(function, "COMPONENT");
+        var results = new List<SapComponent>();
+
+        foreach (var row in EnumerateRows(componentTable))
+        {
+            var material = GetFirstString(row, "MATERIAL", "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR");
+            var description = GetFirstString(row, "MATERIAL_DESCRIPTION", "DESCRIPTION", "MAKTX", "DESCRIPTION1");
+
+            if (string.IsNullOrWhiteSpace(material))
+            {
+                continue;
+            }
+
+            results.Add(new SapComponent(
+                orderNumber.Trim(),
+                material.Trim(),
+                description.Trim()));
+        }
+
+        _logger.LogInformation("BAPI_PRODORD_GET_DETAIL returned {Count} COMPONENT rows for order {OrderNumber}.", results.Count, orderNumber);
+        _logger.LogInformation("Mapped COMPONENT fields used: MATERIAL/MATERIAL_LONG/MATERIAL_EXTERNAL, MATERIAL_DESCRIPTION/DESCRIPTION.");
+
+        return Task.FromResult<IReadOnlyList<SapComponent>>(results);
+    }
 
     private object CreateFunction(string functionName)
     {
@@ -187,6 +250,15 @@ public sealed class SapDllSapClient : ISapClient
                        ?? throw new InvalidOperationException("Could not find structure.SetValue(string, object).");
 
         setValue.Invoke(structure, new object[] { fieldName, "X" });
+    }
+
+    private static object GetStructure(object function, string structureName)
+    {
+        var getStructure = function.GetType().GetMethod("GetStructure", new[] { typeof(string) })
+                           ?? throw new InvalidOperationException("Could not find function.GetStructure(string).");
+
+        return getStructure.Invoke(function, new object[] { structureName })
+               ?? throw new InvalidOperationException($"SAP structure '{structureName}' was null.");
     }
 
     private static object GetTable(object function, string tableName)
