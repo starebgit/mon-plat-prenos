@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.Loader;
 using MonPlatPrenos.Worker.Models;
 
 namespace MonPlatPrenos.Worker.Services;
@@ -36,14 +37,39 @@ public sealed class SapDllSapClient : ISapClient
 
         try
         {
-            _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
+            var sapDllName = Path.GetFileNameWithoutExtension(_sapDllFullPath);
+            var saUtilsDllName = Path.GetFileNameWithoutExtension(_saUtilsDllFullPath);
+
+            AssemblyLoadContext.Default.Resolving += (_, assemblyName) =>
+            {
+                if (string.Equals(assemblyName.Name, sapDllName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return AssemblyLoadContext.Default.LoadFromAssemblyPath(_sapDllFullPath);
+                }
+
+                if (string.Equals(assemblyName.Name, saUtilsDllName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return AssemblyLoadContext.Default.LoadFromAssemblyPath(_saUtilsDllFullPath);
+                }
+
+                return null;
+            };
+
             Assembly.LoadFrom(_saUtilsDllFullPath);
+            _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
         }
         catch (BadImageFormatException ex)
         {
             throw new InvalidOperationException(
                 $"Failed to load SAP assemblies due to architecture mismatch. Process is {(Environment.Is64BitProcess ? "x64" : "x86")}. " +
                 $"Configured SAP assemblies: '{_sapDllFullPath}' and '{_saUtilsDllFullPath}'. Ensure both are x64 SAP NCo binaries.",
+                ex);
+        }
+        catch (FileNotFoundException ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to load SAP assemblies from '{_sapDllFullPath}' and '{_saUtilsDllFullPath}'. " +
+                "One of the dependencies of SAP NCo is missing (most commonly Visual C++ runtime) or sapnco/sapnco_utils versions do not match.",
                 ex);
         }
         catch (FileLoadException ex)
