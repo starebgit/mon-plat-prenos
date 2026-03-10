@@ -37,26 +37,8 @@ public sealed class SapDllSapClient : ISapClient
 
         try
         {
-            var sapDllName = Path.GetFileNameWithoutExtension(_sapDllFullPath);
-            var saUtilsDllName = Path.GetFileNameWithoutExtension(_saUtilsDllFullPath);
-
-            AssemblyLoadContext.Default.Resolving += (_, assemblyName) =>
-            {
-                if (string.Equals(assemblyName.Name, sapDllName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return AssemblyLoadContext.Default.LoadFromAssemblyPath(_sapDllFullPath);
-                }
-
-                if (string.Equals(assemblyName.Name, saUtilsDllName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return AssemblyLoadContext.Default.LoadFromAssemblyPath(_saUtilsDllFullPath);
-                }
-
-                return null;
-            };
-
-            Assembly.LoadFrom(_saUtilsDllFullPath);
-            _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
+            AssemblyLoadContext.Default.LoadFromAssemblyPath(_saUtilsDllFullPath);
+            _sapAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(_sapDllFullPath);
         }
         catch (BadImageFormatException ex)
         {

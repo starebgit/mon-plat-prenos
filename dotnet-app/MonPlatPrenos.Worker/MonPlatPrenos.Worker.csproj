@@ -13,19 +13,6 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('lib/sapnco.dll')">
-    <Reference Include="sapnco">
-      <HintPath>lib/sapnco.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup Condition="Exists('lib/sapnco_utils.dll')">
-    <Reference Include="sapnco_utils">
-      <HintPath>lib/sapnco_utils.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-  </ItemGroup>
 
   <ItemGroup>
     <None Update="lib\*.dll">
