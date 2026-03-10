@@ -583,10 +583,18 @@ public sealed class SapDllSapClient : ISapClient
                               && m.GetParameters()[0].ParameterType.FullName == providerType.FullName)
             ?? throw new InvalidOperationException("RfcDestinationManager.RegisterDestinationConfiguration(...) not found.");
 
-        var proxy = DispatchProxy.Create(providerType, typeof(ReflectionDestinationConfigurationProxy));
+        var createMethod = typeof(DispatchProxy)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == "Create" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 2)
+            ?? throw new InvalidOperationException("DispatchProxy.Create<T, TProxy>() not found.");
+
+        var closedCreate = createMethod.MakeGenericMethod(providerType, typeof(ReflectionDestinationConfigurationProxy));
+        var proxy = closedCreate.Invoke(null, null)
+            ?? throw new InvalidOperationException("Could not create SAP destination configuration proxy.");
+
         if (proxy is not ReflectionDestinationConfigurationProxy impl)
         {
-            throw new InvalidOperationException("Could not create SAP destination configuration proxy.");
+            throw new InvalidOperationException("Created SAP destination proxy has unexpected runtime type.");
         }
 
         impl.Initialize(_sapAssembly, _options, _logger);
