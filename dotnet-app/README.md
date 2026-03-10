@@ -25,9 +25,19 @@ cd dotnet-app/MonPlatPrenos.Worker
 # one-time run for testing:
 dotnet run -- --run-once
 
+# replay one specific day (uses order StartDate filter):
+dotnet run -- --run-once --from-date 2026-03-09
+
+# replay date range day-by-day (inclusive):
+dotnet run -- --run-once --from-date 2026-03-01 --to-date 2026-03-09
+
 # scheduler mode (runs every day at DailyRunTime):
 dotnet run
 ```
+
+`--from-date`/`--to-date` are test/replay helpers. In replay mode, one job run is executed per day and logs per-step counters (orders fetched, filtered, operations, confirmations, component matches, and outputs).
+
+During `--run-once`, the console now also prints a command-line progress bar while iterating orders (Delphi-like loop visibility).
 
 ## Configure new terms
 
@@ -105,6 +115,8 @@ dotnet-app/MonPlatPrenos.Worker/lib/sa_utils.dll
 
 4. Run app. It will load both assemblies via `SapDllSapClient`.
 
+Path resolution note: if a configured DLL path is relative, the worker now tries multiple runtime locations (`current directory`, `AppContext.BaseDirectory`, and common `dotnet run` output-parent path) before failing.
+
 ### Important: what is ready vs not ready
 
 - ✅ **Ready now**:
@@ -116,6 +128,10 @@ dotnet-app/MonPlatPrenos.Worker/lib/sa_utils.dll
   - actual SAP calls and response mapping inside `SapDllSapClient` methods.
 
 `SapDllSapClient` currently throws `NotImplementedException` after successful DLL load, by design, until exact API calls are wired.
+
+### SAP credentials/logon context in .NET worker
+
+The .NET app does not directly send username/password in appsettings. Authentication is delegated to `sap.dll` / SAP runtime context on the machine (same principle as existing runtime integration). The worker logs this explicitly at startup and will also print optional `SAP_USER`, `SAP_CLIENT`, `SAP_SYSTEM` environment hints if present.
 
 ### Where to implement real calls
 
@@ -143,3 +159,17 @@ A Windows Forms debug app is included: `MonPlatPrenos.DebugRunner`.
   - `prenos-debug-*.txt`
 
 The form displays the generated debug text dump, so you can validate parity before any DB writing stage.
+
+## Legacy Delphi DB tables to inspect daily transfer counts
+
+The Delphi app writes transfer data into Access/ADO tables defined through `Montaz_pl.udl`. Key tables updated in the transfer flow:
+
+- `plosce` (plate transfer rows),
+- `samoti`,
+- `protekt`,
+- `sponke`,
+- `ulitki`,
+- `obroci`,
+- `Zadprenos` (run timestamp marker).
+
+Useful daily checks in the legacy DB are based on `plosce.danstart` (orders per day) and the latest record in `Zadprenos` (last transfer execution).

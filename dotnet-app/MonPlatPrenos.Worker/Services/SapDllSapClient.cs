@@ -15,24 +15,37 @@ public sealed class SapDllSapClient : ISapClient
 
     public SapDllSapClient(SapIntegrationOptions options, ILogger<SapDllSapClient> logger)
     {
-        _sapDllFullPath = Path.GetFullPath(options.SapDllPath);
-        _saUtilsDllFullPath = Path.GetFullPath(options.SaUtilsDllPath);
+        _sapDllFullPath = ResolveExistingPath(options.SapDllPath);
+        _saUtilsDllFullPath = ResolveExistingPath(options.SaUtilsDllPath);
         _logger = logger;
 
-        if (!File.Exists(_sapDllFullPath))
+        if (string.IsNullOrWhiteSpace(_sapDllFullPath))
         {
-            throw new FileNotFoundException($"SAP library not found: {_sapDllFullPath}");
+            throw new FileNotFoundException(BuildNotFoundMessage("sap.dll", options.SapDllPath));
         }
 
-        if (!File.Exists(_saUtilsDllFullPath))
+        if (string.IsNullOrWhiteSpace(_saUtilsDllFullPath))
         {
-            throw new FileNotFoundException($"SA utils library not found: {_saUtilsDllFullPath}");
+            throw new FileNotFoundException(BuildNotFoundMessage("sa_utils.dll", options.SaUtilsDllPath));
         }
 
         _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
         Assembly.LoadFrom(_saUtilsDllFullPath);
 
         logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}", _sapDllFullPath, _saUtilsDllFullPath);
+        logger.LogInformation("SAP authentication note: .NET worker does not pass username/password directly. Authentication is delegated to sap.dll / SAP runtime context.");
+
+        var envUser = Environment.GetEnvironmentVariable("SAP_USER");
+        var envClient = Environment.GetEnvironmentVariable("SAP_CLIENT");
+        var envSystem = Environment.GetEnvironmentVariable("SAP_SYSTEM");
+        if (!string.IsNullOrWhiteSpace(envUser) || !string.IsNullOrWhiteSpace(envClient) || !string.IsNullOrWhiteSpace(envSystem))
+        {
+            logger.LogInformation("SAP env hints: SAP_USER={SapUser}, SAP_CLIENT={SapClient}, SAP_SYSTEM={SapSystem}", Mask(envUser), envClient ?? "<empty>", envSystem ?? "<empty>");
+        }
+        else
+        {
+            logger.LogWarning("No SAP_* environment hints were found (SAP_USER/SAP_CLIENT/SAP_SYSTEM). If SAP login fails, verify runtime SAP logon context on the host machine.");
+        }
     }
 
     public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, CancellationToken cancellationToken)
@@ -501,5 +514,74 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         return DateTime.MinValue;
+    }
+
+    private static string Mask(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "<empty>";
+        }
+
+        if (value.Length <= 2)
+        {
+            return "**";
+        }
+
+        return value[0] + new string('*', value.Length - 2) + value[^1];
+    }
+
+    private static string ResolveExistingPath(string configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return string.Empty;
+        }
+
+        var fileName = Path.GetFileName(configuredPath);
+        var candidates = new List<string>();
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            candidates.Add(configuredPath);
+        }
+        else
+        {
+            candidates.Add(Path.GetFullPath(configuredPath, Directory.GetCurrentDirectory()));
+            candidates.Add(Path.GetFullPath(configuredPath, AppContext.BaseDirectory));
+            candidates.Add(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", configuredPath)));
+
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                candidates.Add(Path.Combine(AppContext.BaseDirectory, fileName));
+                candidates.Add(Path.Combine(Directory.GetCurrentDirectory(), fileName));
+            }
+        }
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildNotFoundMessage(string expectedFileName, string configuredPath)
+    {
+        var candidates = new List<string>
+        {
+            Path.GetFullPath(configuredPath, Directory.GetCurrentDirectory()),
+            Path.GetFullPath(configuredPath, AppContext.BaseDirectory),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", configuredPath)),
+            Path.Combine(AppContext.BaseDirectory, expectedFileName),
+            Path.Combine(Directory.GetCurrentDirectory(), expectedFileName)
+        }
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+        return $"Required SAP runtime library '{expectedFileName}' not found. Configured path='{configuredPath}'. Tried: {string.Join(" | ", candidates)}";
     }
 }
