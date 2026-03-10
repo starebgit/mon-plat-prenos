@@ -16,8 +16,8 @@ public sealed class SapDllSapClient : ISapClient
 
     public SapDllSapClient(SapIntegrationOptions options, ILogger<SapDllSapClient> logger)
     {
-        _sapDllFullPath = Path.GetFullPath(options.SapDllPath);
-        _saUtilsDllFullPath = Path.GetFullPath(options.SaUtilsDllPath);
+        _sapDllFullPath = ResolveSapPath(options.SapDllPath, "sapnco.dll");
+        _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath, "sapnco_utils.dll");
         _logger = logger;
 
         if (!File.Exists(_sapDllFullPath))
@@ -62,6 +62,36 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}", _sapDllFullPath, _saUtilsDllFullPath);
+    }
+
+
+    private static string ResolveSapPath(string configuredPath, string defaultFileName)
+    {
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        var baseDir = AppContext.BaseDirectory;
+        var primary = Path.GetFullPath(Path.Combine(baseDir, configuredPath));
+        if (File.Exists(primary))
+        {
+            return primary;
+        }
+
+        var fallbackInRoot = Path.GetFullPath(Path.Combine(baseDir, defaultFileName));
+        if (File.Exists(fallbackInRoot))
+        {
+            return fallbackInRoot;
+        }
+
+        var fallbackInLib = Path.GetFullPath(Path.Combine(baseDir, "lib", defaultFileName));
+        if (File.Exists(fallbackInLib))
+        {
+            return fallbackInLib;
+        }
+
+        return primary;
     }
 
     public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, CancellationToken cancellationToken)
