@@ -11,16 +11,16 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('lib/sap.dll')">
-    <Reference Include="sap">
-      <HintPath>lib/sap.dll</HintPath>
+  <ItemGroup Condition="Exists('lib/sapnco.dll')">
+    <Reference Include="sapnco">
+      <HintPath>lib/sapnco.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('lib/sa_utils.dll')">
-    <Reference Include="sa_utils">
-      <HintPath>lib/sa_utils.dll</HintPath>
+  <ItemGroup Condition="Exists('lib/sapnco_utils.dll')">
+    <Reference Include="sapnco_utils">
+      <HintPath>lib/sapnco_utils.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>
