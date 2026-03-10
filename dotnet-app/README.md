@@ -100,8 +100,7 @@ dotnet-app/MonPlatPrenos.Worker/lib/sapnco.dll
 dotnet-app/MonPlatPrenos.Worker/lib/sapnco_utils.dll
 ```
 
-2. The `.csproj` already auto-references them if present (`<Reference>` + `<HintPath>`), and copies them to output on build.
-3. In `appsettings.json`, set:
+2. In `appsettings.json`, set:
 
 ```json
 "Sap": {
@@ -111,16 +110,23 @@ dotnet-app/MonPlatPrenos.Worker/lib/sapnco_utils.dll
 }
 ```
 
-4. Run app. It will load both assemblies via `SapDllSapClient`.
+3. Run app. It will load both assemblies directly from the configured paths via `SapDllSapClient`.
 
-5. Use **x64** SAP NCo binaries and run the worker as **x64** (the project sets `PlatformTarget` to `x64`).
+4. Use **x64** SAP NCo binaries and run the worker as **x64** (the project sets `PlatformTarget` to `x64`).
    If you still get `The specified module could not be found`, that usually means a missing native dependency (commonly Visual C++ runtime) or mismatched `sapnco`/`sapnco_utils` versions.
+
+5. Quick DLL/version check in PowerShell:
+
+```powershell
+Get-Item .\lib\sapnco.dll, .\lib\sapnco_utils.dll |
+  Select-Object Name, Length, @{n="ProductVersion";e={$_.VersionInfo.ProductVersion}}, @{n="FileVersion";e={$_.VersionInfo.FileVersion}}
+```
 
 ### Important: what is ready vs not ready
 
 - ✅ **Ready now**:
   - DLL location convention,
-  - project references,
+  - loading SAP DLLs directly from configured paths,
   - runtime assembly load check,
   - config switch between mock and DLL mode.
 - ⛏️ **Still to implement**:
