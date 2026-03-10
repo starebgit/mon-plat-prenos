@@ -18,7 +18,7 @@ This is a .NET 8 worker app that mirrors the current Delphi behavior and is read
 
 ## Run
 
-Runtime alignment: `net8.0` worker + `sap.dll` / `sa_utils.dll` paths from `appsettings.json`.
+Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths from `appsettings.json`.
 
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
@@ -89,15 +89,15 @@ So "filtering by operations" means "use only selected operation types as the sou
 
 Right now `MockSapClient` provides local test data.
 
-### Using `sap.dll` and `sa_utils.dll`
+### Using `sapnco.dll` and `sapnco_utils.dll`
 
 The project is now prepared for these two DLLs:
 
 1. Put files here:
 
 ```text
-dotnet-app/MonPlatPrenos.Worker/lib/sap.dll
-dotnet-app/MonPlatPrenos.Worker/lib/sa_utils.dll
+dotnet-app/MonPlatPrenos.Worker/lib/sapnco.dll
+dotnet-app/MonPlatPrenos.Worker/lib/sapnco_utils.dll
 ```
 
 2. The `.csproj` already auto-references them if present (`<Reference>` + `<HintPath>`), and copies them to output on build.
@@ -106,8 +106,8 @@ dotnet-app/MonPlatPrenos.Worker/lib/sa_utils.dll
 ```json
 "Sap": {
   "UseMock": false,
-  "SapDllPath": "lib/sap.dll",
-  "SaUtilsDllPath": "lib/sa_utils.dll"
+  "SapDllPath": "lib/sapnco.dll",
+  "SaUtilsDllPath": "lib/sapnco_utils.dll"
 }
 ```
 
