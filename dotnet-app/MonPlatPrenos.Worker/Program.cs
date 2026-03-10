@@ -42,7 +42,7 @@ public static class Program
             })
             .Build();
 
-        if (args.Contains("--run-once", StringComparer.OrdinalIgnoreCase))
+        if (args.Any(a => string.Equals(a, "--run-once", StringComparison.OrdinalIgnoreCase)))
         {
             using (var scope = host.Services.CreateScope())
             {

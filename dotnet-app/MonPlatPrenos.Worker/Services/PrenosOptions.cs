@@ -39,12 +39,12 @@ public sealed class TermRule
             return false;
         }
 
-        if (!input.Contains(Contains, StringComparison.OrdinalIgnoreCase))
+        if (input.IndexOf(Contains, StringComparison.OrdinalIgnoreCase) < 0)
         {
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(ExcludeContains) && input.Contains(ExcludeContains, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(ExcludeContains) && input.IndexOf(ExcludeContains, StringComparison.OrdinalIgnoreCase) >= 0)
         {
             return false;
         }

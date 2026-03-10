@@ -74,7 +74,7 @@ public sealed class PrenosJob
             stats.OrdersAfterCoreFilters++;
             var operations = await _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken);
             var validOperations = operations
-                .Where(o => _options.OperationCodes.Contains(o.OperationCode, StringComparer.OrdinalIgnoreCase))
+                .Where(o => _options.OperationCodes.Any(code => string.Equals(code, o.OperationCode, StringComparison.OrdinalIgnoreCase)))
                 .Where(o => o.ConfirmableQty > 0)
                 .Where(o => o.StepCode == "0010")
                 .ToList();
@@ -257,13 +257,13 @@ public sealed class PrenosJob
 
         foreach (var cmp in components)
         {
-            if (cmp.Description.Contains("ULITEK", StringComparison.OrdinalIgnoreCase))
+            if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, cancellationToken, depth: 1);
                 continue;
             }
 
-            if (cmp.Description.Contains("SPIRALA", StringComparison.OrdinalIgnoreCase))
+            if (cmp.Description.IndexOf("SPIRALA", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 semiFinished.Add(new SemiFinishedTrace(
                     plateOrder.OrderNumber,
@@ -308,9 +308,13 @@ public sealed class PrenosJob
 
         public void AddCategoryHit(string category)
         {
-            if (!CategoryHits.TryAdd(category, 1))
+            if (CategoryHits.ContainsKey(category))
             {
                 CategoryHits[category] += 1;
+            }
+            else
+            {
+                CategoryHits.Add(category, 1);
             }
         }
     }
@@ -327,13 +331,13 @@ public sealed class PrenosJob
         var platePath = Path.Combine(_options.OutputDirectory, $"plates-{stamp}.json");
         var unifiedPath = Path.Combine(_options.OutputDirectory, $"unified-{stamp}.json");
 
-        await File.WriteAllTextAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
-        await File.WriteAllTextAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await WriteAllTextCompatAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await WriteAllTextCompatAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
 
         if (_options.EnableDebugJson)
         {
             var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
-            await File.WriteAllTextAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+            await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         }
 
         if (_options.EnableDebugTextDump)
@@ -360,8 +364,17 @@ public sealed class PrenosJob
                 sb.AppendLine($"{s.PlateOrder};{s.Category};Semi={s.SemiMaterial};Order={s.SemiOrder};AFRU={s.AfruYieldDelta}");
             }
 
-            await File.WriteAllTextAsync(textPath, sb.ToString(), cancellationToken);
+            await WriteAllTextCompatAsync(textPath, sb.ToString(), cancellationToken);
         }
+    }
+
+    private static Task WriteAllTextCompatAsync(string path, string content, CancellationToken cancellationToken)
+    {
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            File.WriteAllText(path, content);
+        }, cancellationToken);
     }
 
     private static int ParseTrack(string trackCode)
