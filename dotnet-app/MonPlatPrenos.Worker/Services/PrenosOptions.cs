@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace MonPlatPrenos.Worker.Services;
 
 public sealed class PrenosOptions
@@ -7,12 +10,12 @@ public sealed class PrenosOptions
     public string PlateMaterialFrom { get; set; } = "000012080000000000";
     public string PlateMaterialTo { get; set; } = "000019789000000000";
     public string SchedulerCode { get; set; } = "200";
-    public List<string> OperationCodes { get; set; } = ["PP04", "PP14", "PP02", "PP10"];
-    public List<TermRule> DefaultTerms { get; set; } = new();
-    public List<TermRule> ExtraTerms { get; set; } = new();
+    public List<string> OperationCodes { get; set; } = new List<string> { "PP04", "PP14", "PP02", "PP10" };
+    public List<TermRule> DefaultTerms { get; set; } = new List<TermRule>();
+    public List<TermRule> ExtraTerms { get; set; } = new List<TermRule>();
     public bool EnableDebugJson { get; set; } = true;
     public bool EnableDebugTextDump { get; set; } = true;
-    public SapIntegrationOptions Sap { get; set; } = new();
+    public SapIntegrationOptions Sap { get; set; } = new SapIntegrationOptions();
 }
 
 public sealed class SapIntegrationOptions

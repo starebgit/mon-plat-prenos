@@ -1,79 +1,107 @@
-using MonPlatPrenos.Worker.Services;
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MonPlatPrenos.Worker.Services;
 
-var builder = Host.CreateApplicationBuilder(args);
+namespace MonPlatPrenos.Worker;
 
-builder.Services.Configure<PrenosOptions>(builder.Configuration.GetSection("Prenos"));
-builder.Services.AddSingleton<ISapClient>(sp =>
+public static class Program
 {
-    var options = sp.GetRequiredService<IOptions<PrenosOptions>>().Value;
-
-    if (options.Sap.UseMock)
+    public static async Task<int> Main(string[] args)
     {
-        return new MockSapClient();
-    }
+        var host = Host.CreateDefaultBuilder(args)
+            .ConfigureAppConfiguration((_, config) =>
+            {
+                config.SetBasePath(AppContext.BaseDirectory);
+                config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+            })
+            .ConfigureServices((context, services) =>
+            {
+                services.Configure<PrenosOptions>(context.Configuration.GetSection("Prenos"));
+                services.AddSingleton<ISapClient>(sp =>
+                {
+                    var options = sp.GetRequiredService<IOptions<PrenosOptions>>().Value;
 
-    var logger = sp.GetRequiredService<ILogger<SapDllSapClient>>();
-    return new SapDllSapClient(options.Sap, logger);
-});
-builder.Services.AddSingleton<PrenosJob>();
-builder.Services.AddHostedService<SchedulerWorker>();
+                    if (options.Sap.UseMock)
+                    {
+                        return new MockSapClient();
+                    }
 
-var app = builder.Build();
+                    var logger = sp.GetRequiredService<ILogger<SapDllSapClient>>();
+                    return new SapDllSapClient(options.Sap, logger);
+                });
 
-if (args.Contains("--run-once"))
-{
-    using var scope = app.Services.CreateScope();
-    var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
+                services.AddSingleton<PrenosJob>();
+                services.AddHostedService<SchedulerWorker>();
+            })
+            .Build();
 
-    var fromDate = TryGetDateArg(args, "--from-date");
-    var toDate = TryGetDateArg(args, "--to-date");
-
-    if (fromDate.HasValue || toDate.HasValue)
-    {
-        var start = fromDate ?? toDate!.Value;
-        var end = toDate ?? fromDate!.Value;
-        if (end < start)
+        if (args.Contains("--run-once", StringComparer.OrdinalIgnoreCase))
         {
-            (start, end) = (end, start);
+            using (var scope = host.Services.CreateScope())
+            {
+                var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
+                var fromDate = TryGetDateArg(args, "--from-date");
+                var toDate = TryGetDateArg(args, "--to-date");
+
+                if (fromDate.HasValue || toDate.HasValue)
+                {
+                    var start = fromDate ?? toDate.Value;
+                    var end = toDate ?? fromDate.Value;
+                    if (end < start)
+                    {
+                        var tmp = start;
+                        start = end;
+                        end = tmp;
+                    }
+
+                    for (var day = start.Date; day <= end.Date; day = day.AddDays(1))
+                    {
+                        await job.RunAsync(day, CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    await job.RunAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+
+            return 0;
         }
 
-        for (var day = start.Date; day <= end.Date; day = day.AddDays(1))
-        {
-            await job.RunAsync(day, CancellationToken.None);
-        }
-    }
-    else
-    {
-        await job.RunAsync(CancellationToken.None);
+        await host.RunAsync().ConfigureAwait(false);
+        return 0;
     }
 
-    return;
-}
-
-await app.RunAsync();
-
-static DateTime? TryGetDateArg(string[] args, string key)
-{
-    for (var i = 0; i < args.Length; i++)
+    private static DateTime? TryGetDateArg(string[] args, string key)
     {
-        if (!string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
+        for (var i = 0; i < args.Length; i++)
         {
-            continue;
-        }
+            if (!string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
-        if (i + 1 >= args.Length)
-        {
+            if (i + 1 >= args.Length)
+            {
+                return null;
+            }
+
+            DateTime parsed;
+            if (DateTime.TryParse(args[i + 1], out parsed))
+            {
+                return parsed.Date;
+            }
+
             return null;
-        }
-
-        if (DateTime.TryParse(args[i + 1], out var parsed))
-        {
-            return parsed.Date;
         }
 
         return null;
     }
-
-    return null;
 }

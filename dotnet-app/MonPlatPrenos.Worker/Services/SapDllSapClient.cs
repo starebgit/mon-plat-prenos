@@ -1,8 +1,12 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Reflection;
-using System.Runtime.Loader;
 using MonPlatPrenos.Worker.Models;
 
 namespace MonPlatPrenos.Worker.Services;
@@ -13,6 +17,7 @@ public sealed class SapDllSapClient : ISapClient
     private readonly string _saUtilsDllFullPath;
     private readonly ILogger<SapDllSapClient> _logger;
     private readonly Assembly _sapAssembly;
+    private readonly Assembly _sapUtilsAssembly;
 
     public SapDllSapClient(SapIntegrationOptions options, ILogger<SapDllSapClient> logger)
     {
@@ -37,7 +42,8 @@ public sealed class SapDllSapClient : ISapClient
 
         try
         {
-            _sapAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(_sapDllFullPath);
+            _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
+            _sapUtilsAssembly = Assembly.LoadFrom(_saUtilsDllFullPath);
         }
         catch (BadImageFormatException ex)
         {
@@ -61,7 +67,7 @@ public sealed class SapDllSapClient : ISapClient
                 ex);
         }
 
-        logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}", _sapDllFullPath, _saUtilsDllFullPath);
+        logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}. Loaded assemblies: {SapAsm}, {UtilsAsm}", _sapDllFullPath, _saUtilsDllFullPath, _sapAssembly.FullName, _sapUtilsAssembly.FullName);
     }
 
 

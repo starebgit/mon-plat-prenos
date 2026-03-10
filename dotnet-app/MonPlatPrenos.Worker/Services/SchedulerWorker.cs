@@ -1,17 +1,28 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace MonPlatPrenos.Worker.Services;
 
-public sealed class SchedulerWorker(
-    PrenosJob job,
-    IOptions<PrenosOptions> options,
-    ILogger<SchedulerWorker> logger) : BackgroundService
+public sealed class SchedulerWorker : BackgroundService
 {
-    private readonly PrenosOptions _options = options.Value;
+    private readonly PrenosJob _job;
+    private readonly PrenosOptions _options;
+    private readonly ILogger<SchedulerWorker> _logger;
+
+    public SchedulerWorker(PrenosJob job, IOptions<PrenosOptions> options, ILogger<SchedulerWorker> logger)
+    {
+        _job = job;
+        _options = options.Value;
+        _logger = logger;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Scheduler worker running.");
+        _logger.LogInformation("Scheduler worker running.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -20,7 +31,7 @@ public sealed class SchedulerWorker(
 
             if (delay > TimeSpan.Zero)
             {
-                logger.LogInformation("Next run at {NextRun} (in {Delay}).", next, delay);
+                _logger.LogInformation("Next run at {NextRun} (in {Delay}).", next, delay);
                 await Task.Delay(delay, stoppingToken);
             }
 
@@ -31,18 +42,19 @@ public sealed class SchedulerWorker(
 
             try
             {
-                await job.RunAsync(stoppingToken);
+                await _job.RunAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Job run failed.");
+                _logger.LogError(ex, "Job run failed.");
             }
         }
     }
 
     private static DateTime GetNextRun(DateTime now, string dailyRunTime)
     {
-        if (!TimeSpan.TryParse(dailyRunTime, out var runAt))
+        TimeSpan runAt;
+        if (!TimeSpan.TryParse(dailyRunTime, out runAt))
         {
             runAt = new TimeSpan(7, 30, 0);
         }
