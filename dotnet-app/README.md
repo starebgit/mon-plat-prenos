@@ -147,6 +147,47 @@ Get-Item .\lib\sapnco.dll, .\lib\sapnco_utils.dll |
   Select-Object Name, Length, @{n="ProductVersion";e={$_.VersionInfo.ProductVersion}}, @{n="FileVersion";e={$_.VersionInfo.FileVersion}}
 ```
 
+
+### If `--run-once` fails with `no destination configuration registered`
+
+If logs show:
+
+- `RfcInvalidStateException: Cannot get destination MONPLAT -- no destination configuration registered`
+
+then SAP NCo can load, but destination parameters were not registered.
+
+You can now define destination settings directly in `appsettings.json` under `Prenos:Sap`:
+
+```json
+"Sap": {
+  "UseMock": false,
+  "DestinationName": "MONPLAT",
+  "AppServerHost": "your-sap-host",
+  "SystemNumber": "00",
+  "Client": "100",
+  "User": "YOUR_USER",
+  "Password": "YOUR_PASSWORD",
+  "Language": "EN",
+  "Router": ""
+}
+```
+
+When these fields are present, the worker registers an inline destination provider automatically before first RFC call.
+
+If these SAP fields are empty, the worker can load Delphi-style login from SQL table `prijava` using a configured connection string:
+
+```json
+"Sap": {
+  "SapLoginConnectionString": "Provider=SQLOLEDB.1;Password=akplat;Persist Security Info=True;User ID=akplat;Initial Catalog=SAPkontrola;Data Source=172.20.1.14",
+  "SapLoginIdent": null
+}
+```
+
+- `SapLoginConnectionString`: direct DB connection string for table `prijava`.
+- `SapLoginIdent`: optional specific `prijava.ident`; when null, uses default row `glavni = 'X'`.
+
+Mapped columns: `uporab -> User`, `client -> Client`, `streznik -> AppServerHost`, `sysnnum -> SystemNumber`, `pass -> Password`, `jezik -> Language`.
+
 ### Important: what is ready vs not ready
 
 - ✅ **Ready now**:
