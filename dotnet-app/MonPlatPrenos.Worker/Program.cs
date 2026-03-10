@@ -25,8 +25,55 @@ if (args.Contains("--run-once"))
 {
     using var scope = app.Services.CreateScope();
     var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
-    await job.RunAsync(CancellationToken.None);
+
+    var fromDate = TryGetDateArg(args, "--from-date");
+    var toDate = TryGetDateArg(args, "--to-date");
+
+    if (fromDate.HasValue || toDate.HasValue)
+    {
+        var start = fromDate ?? toDate!.Value;
+        var end = toDate ?? fromDate!.Value;
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        for (var day = start.Date; day <= end.Date; day = day.AddDays(1))
+        {
+            await job.RunAsync(day, CancellationToken.None);
+        }
+    }
+    else
+    {
+        await job.RunAsync(CancellationToken.None);
+    }
+
     return;
 }
 
 await app.RunAsync();
+
+static DateTime? TryGetDateArg(string[] args, string key)
+{
+    for (var i = 0; i < args.Length; i++)
+    {
+        if (!string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        if (i + 1 >= args.Length)
+        {
+            return null;
+        }
+
+        if (DateTime.TryParse(args[i + 1], out var parsed))
+        {
+            return parsed.Date;
+        }
+
+        return null;
+    }
+
+    return null;
+}

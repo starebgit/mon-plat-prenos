@@ -25,9 +25,17 @@ cd dotnet-app/MonPlatPrenos.Worker
 # one-time run for testing:
 dotnet run -- --run-once
 
+# replay one specific day (uses order StartDate filter):
+dotnet run -- --run-once --from-date 2026-03-09
+
+# replay date range day-by-day (inclusive):
+dotnet run -- --run-once --from-date 2026-03-01 --to-date 2026-03-09
+
 # scheduler mode (runs every day at DailyRunTime):
 dotnet run
 ```
+
+`--from-date`/`--to-date` are test/replay helpers. In replay mode, one job run is executed per day and logs per-step counters (orders fetched, filtered, operations, confirmations, component matches, and outputs).
 
 ## Configure new terms
 
@@ -143,3 +151,17 @@ A Windows Forms debug app is included: `MonPlatPrenos.DebugRunner`.
   - `prenos-debug-*.txt`
 
 The form displays the generated debug text dump, so you can validate parity before any DB writing stage.
+
+## Legacy Delphi DB tables to inspect daily transfer counts
+
+The Delphi app writes transfer data into Access/ADO tables defined through `Montaz_pl.udl`. Key tables updated in the transfer flow:
+
+- `plosce` (plate transfer rows),
+- `samoti`,
+- `protekt`,
+- `sponke`,
+- `ulitki`,
+- `obroci`,
+- `Zadprenos` (run timestamp marker).
+
+Useful daily checks in the legacy DB are based on `plosce.danstart` (orders per day) and the latest record in `Zadprenos` (last transfer execution).
