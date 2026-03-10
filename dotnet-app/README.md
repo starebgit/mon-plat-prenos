@@ -115,6 +115,31 @@ dotnet-app/MonPlatPrenos.Worker/lib/sapnco_utils.dll
 4. Use **x64** SAP NCo binaries and run the worker as **x64** (the project sets `PlatformTarget` to `x64`).
    If you still get `The specified module could not be found`, that usually means a missing native dependency (commonly Visual C++ runtime) or mismatched `sapnco`/`sapnco_utils` versions.
 
+#### Interpreting `sap-debug-*.txt` (common failure)
+
+If your log shows:
+
+- `Loaded SAP libraries: ...sapnco.dll and ...sapnco_utils.dll`
+- followed by: `Could not load file or assembly '...sapnco_utils.dll'. The specified module could not be found.`
+
+then the file itself is usually present, but one of its **native dependencies** is missing (for example SAP NW RFC SDK binaries on `PATH`, or required Visual C++ runtime).
+
+This is **not** the classic `.NET Framework 4.7 vs 4.8` issue in this worker:
+
+- the project targets `net8.0`,
+- runs on `.NET` (`Microsoft.NETCore.App`),
+- and uses SAP NCo assemblies from local DLLs.
+
+In other words, fix native SAP/runtime dependencies first, not .NET Framework 4.x.
+
+Practical checks on the machine where the worker runs:
+
+1. Verify architecture is consistent everywhere (worker x64, sapnco x64, sapnco_utils x64, SAP native SDK x64).
+2. Confirm the SAP native RFC SDK DLLs required by `sapnco_utils.dll` are available in process search path.
+3. Install/update Microsoft Visual C++ Redistributable x64 (2015-2022) if missing.
+4. Keep `sapnco.dll` and `sapnco_utils.dll` from the exact same SAP NCo package/version.
+5. Re-run with host tracing and check for first `FileNotFoundException`/`The specified module could not be found` entry.
+
 5. Quick DLL/version check in PowerShell:
 
 ```powershell
@@ -144,6 +169,85 @@ Get-Item .\lib\sapnco.dll, .\lib\sapnco_utils.dll |
   - `GetComponentsAsync`
 
 Map results into records in `Models/SapModels.cs`.
+
+## Migration plan: .NET 8 worker -> .NET Framework 4.8 (for legacy SAP NCo)
+
+If your SAP NCo binaries only support classic .NET Framework, use this plan to migrate safely.
+
+### 1) Confirm SAP/NCo compatibility first
+
+Before changing code, verify exactly which SAP NCo package you have and which runtime it supports:
+
+- if it is a .NET Framework-only build, target `net48` in this solution,
+- keep all SAP binaries and native dependencies strictly x64.
+
+### 2) Project retargeting
+
+- Change project SDK from worker-style modern hosting assumptions to a plain console app targeting .NET Framework:
+  - replace `TargetFramework` `net8.0` with `net48`,
+  - keep `PlatformTarget` = `x64`, `Prefer32Bit` = `false`.
+- Replace `PackageReference` set with versions that support .NET Framework 4.8 (or move to `packages.config` if needed).
+
+### 3) Hosting/bootstrap changes in `Program.cs`
+
+Current startup uses modern generic host APIs (`Host.CreateApplicationBuilder`) from .NET 8.
+For `net48`, migrate to one of:
+
+- `HostBuilder` + `Microsoft.Extensions.Hosting` version compatible with net48, or
+- manual dependency wiring if host package compatibility is insufficient.
+
+Keep behavior parity:
+
+- `--run-once`,
+- date range replay,
+- scheduled mode.
+
+### 4) Assembly loading changes in `SapDllSapClient`
+
+`AssemblyLoadContext` is a .NET Core/.NET 5+ API and must be replaced on .NET Framework.
+Use .NET Framework-compatible loading:
+
+- `Assembly.LoadFrom(...)` for managed SAP assemblies,
+- `AppDomain.CurrentDomain.AssemblyResolve` only if absolutely required,
+- keep explicit checks and clear diagnostics for x64 mismatch and missing dependencies.
+
+### 5) SAP native dependency verification (on target machine)
+
+For the machine that runs the worker:
+
+- install required SAP NW RFC SDK/native DLL set expected by your NCo build,
+- install required VC++ redistributable version (x64),
+- confirm PATH includes required native dependency locations,
+- verify `sapnco.dll` + `sapnco_utils.dll` come from the exact same package/version.
+
+### 6) Build/test matrix for migration acceptance
+
+Run these checks as migration gates:
+
+1. `Debug|x64` and `Release|x64` build pass.
+2. `--run-once` with mock SAP passes.
+3. `--run-once` with real SAP reaches destination creation without loader exceptions.
+4. One-day replay (`--from-date`) produces expected output files.
+5. Scheduled mode starts and logs next-run behavior correctly.
+
+### 7) Rollout strategy
+
+- Keep a branch/tag with current `net8.0` state.
+- Introduce migration in small commits:
+  1) retarget project,
+  2) startup/hosting refactor,
+  3) SAP loader refactor,
+  4) environment validation scripts/docs.
+- Validate on a staging machine that matches production SAP runtime prerequisites before production rollout.
+
+### 8) Main risks to watch
+
+- host package version incompatibility on net48,
+- hidden transitive native DLL dependency gaps,
+- architecture drift (x86 vs x64),
+- behavior drift in scheduling/replay mode after host/bootstrap refactor.
+
+
 
 
 ## Debug button runner (no DB writes)
