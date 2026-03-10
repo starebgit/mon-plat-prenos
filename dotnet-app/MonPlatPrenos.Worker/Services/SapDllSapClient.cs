@@ -37,7 +37,6 @@ public sealed class SapDllSapClient : ISapClient
 
         try
         {
-            AssemblyLoadContext.Default.LoadFromAssemblyPath(_saUtilsDllFullPath);
             _sapAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(_sapDllFullPath);
         }
         catch (BadImageFormatException ex)
