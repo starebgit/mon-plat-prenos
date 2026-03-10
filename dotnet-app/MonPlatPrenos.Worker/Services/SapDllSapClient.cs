@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Reflection;
+using System.Data;
+using System.Data.OleDb;
 using MonPlatPrenos.Worker.Models;
 
 namespace MonPlatPrenos.Worker.Services;
@@ -71,6 +73,7 @@ public sealed class SapDllSapClient : ISapClient
 
         logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}. Loaded assemblies: {SapAsm}, {UtilsAsm}", _sapDllFullPath, _saUtilsDllFullPath, _sapAssembly.FullName, _sapUtilsAssembly.FullName);
 
+        TryLoadSapLoginFromDatabase();
         RegisterDestinationConfigurationIfConfigured();
     }
 
@@ -459,6 +462,104 @@ public sealed class SapDllSapClient : ISapClient
 
         return getDestination.Invoke(null, new object[] { destinationName })
                ?? throw new InvalidOperationException($"GetDestination returned null for destination {destinationName}.");
+    }
+
+    private void TryLoadSapLoginFromDatabase()
+    {
+        if (HasInlineDestinationConfig())
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.SapLoginConnectionString))
+        {
+            _logger.LogInformation("SapLoginConnectionString is empty; skipping DB login lookup.");
+            return;
+        }
+
+        try
+        {
+            using (var connection = new OleDbConnection(_options.SapLoginConnectionString))
+            {
+                connection.Open();
+
+                using (var command = connection.CreateCommand())
+                {
+                    if (_options.SapLoginIdent.HasValue)
+                    {
+                        command.CommandText = "select top 1 uporab, sistem, client, streznik, sysnnum, pass, jezik from prijava where ident = ?";
+                        command.Parameters.AddWithValue("@p1", _options.SapLoginIdent.Value);
+                    }
+                    else
+                    {
+                        command.CommandText = "select top 1 uporab, sistem, client, streznik, sysnnum, pass, jezik from prijava where glavni = 'X'";
+                    }
+
+                    using (var reader = command.ExecuteReader(CommandBehavior.SingleRow))
+                    {
+                        if (reader is null || !reader.Read())
+                        {
+                            _logger.LogWarning("No SAP login row found in table prijava (ident={Ident}).", _options.SapLoginIdent);
+                            return;
+                        }
+
+                        _options.User = SafeGetString(reader, 0);
+                        _options.SystemNumber = SafeGetIntString(reader, 4);
+                        _options.SystemNumber = string.IsNullOrWhiteSpace(_options.SystemNumber) ? _options.SystemNumber : _options.SystemNumber.PadLeft(2, '0');
+                        _options.Client = SafeGetString(reader, 2);
+                        _options.AppServerHost = SafeGetString(reader, 3);
+                        _options.Password = SafeGetString(reader, 5);
+                        _options.Language = SafeGetString(reader, 6);
+
+                        var systemName = SafeGetString(reader, 1);
+                        if (!string.IsNullOrWhiteSpace(systemName)
+                            && string.Equals(_options.DestinationName, "MONPLAT", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _options.DestinationName = systemName;
+                        }
+                    }
+                }
+            }
+
+            if (HasInlineDestinationConfig())
+            {
+                _logger.LogInformation("Loaded SAP login from DB for destination {DestinationName}.", _options.DestinationName);
+            }
+            else
+            {
+                _logger.LogWarning("SAP login lookup from DB succeeded but required fields are still incomplete.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load SAP login from DB.");
+        }
+    }
+
+    private static string SafeGetString(IDataRecord record, int ordinal)
+    {
+        return record.IsDBNull(ordinal) ? string.Empty : Convert.ToString(record.GetValue(ordinal), CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+    }
+
+    private static string SafeGetIntString(IDataRecord record, int ordinal)
+    {
+        if (record.IsDBNull(ordinal))
+        {
+            return string.Empty;
+        }
+
+        var value = record.GetValue(ordinal);
+        if (value is short s)
+        {
+            return s.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (value is int i)
+        {
+            return i.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
     }
 
     private void RegisterDestinationConfigurationIfConfigured()

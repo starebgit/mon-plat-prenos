@@ -174,6 +174,20 @@ You can now define destination settings directly in `appsettings.json` under `Pr
 
 When these fields are present, the worker registers an inline destination provider automatically before first RFC call.
 
+If these SAP fields are empty, the worker can load Delphi-style login from SQL table `prijava` using a configured connection string:
+
+```json
+"Sap": {
+  "SapLoginConnectionString": "Provider=SQLOLEDB.1;Password=akplat;Persist Security Info=True;User ID=akplat;Initial Catalog=SAPkontrola;Data Source=172.20.1.14",
+  "SapLoginIdent": null
+}
+```
+
+- `SapLoginConnectionString`: direct DB connection string for table `prijava`.
+- `SapLoginIdent`: optional specific `prijava.ident`; when null, uses default row `glavni = 'X'`.
+
+Mapped columns: `uporab -> User`, `client -> Client`, `streznik -> AppServerHost`, `sysnnum -> SystemNumber`, `pass -> Password`, `jezik -> Language`.
+
 ### Important: what is ready vs not ready
 
 - ✅ **Ready now**:

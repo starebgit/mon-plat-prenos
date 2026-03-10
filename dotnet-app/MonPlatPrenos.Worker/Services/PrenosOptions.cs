@@ -31,6 +31,8 @@ public sealed class SapIntegrationOptions
     public string? Password { get; set; }
     public string? Language { get; set; }
     public string? Router { get; set; }
+    public string? SapLoginConnectionString { get; set; }
+    public int? SapLoginIdent { get; set; }
 }
 
 public sealed class TermRule
