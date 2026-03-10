@@ -23,6 +23,14 @@ public sealed class SapIntegrationOptions
     public bool UseMock { get; set; } = false;
     public string SapDllPath { get; set; } = "sapnco.dll";
     public string SaUtilsDllPath { get; set; } = "sapnco_utils.dll";
+    public string DestinationName { get; set; } = "MONPLAT";
+    public string? AppServerHost { get; set; }
+    public string? SystemNumber { get; set; }
+    public string? Client { get; set; }
+    public string? User { get; set; }
+    public string? Password { get; set; }
+    public string? Language { get; set; }
+    public string? Router { get; set; }
 }
 
 public sealed class TermRule
