@@ -1,0 +1,68 @@
+
+**** Log file opened by process 2184 at 2026-03-10 12:26:05 (UTC+01:00 Zahodnoevropski standardni čas)
+
+SAP .NET Connector 3.1 with file version 3.1.6.0 running on 64-bit .NET Framework 4.0.30319.42000
+Program: C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\bin\Debug\net48\MonPlatPrenos.Worker.exe
+Working directory: C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker
+Trace directory: .\
+Trace encoding: utf-8
+Operating system: Windows 10 Professional 64-bit 
+Processor: 12x AMD64 (or x64)
+SAP release: 789, Kernel release: 789, Kernel patch level: 413
+Hostname: CL003240, IP address: 10.5.0.102, IP_v6 address: 
+Locale: sl-SI (number decimal separator: ",", number group separator: ".", negative sign: "-")
+
+Default trace level: None
+
+>> Error entry 2026-03-10 12:26:05.093 [Thread 1]
+SAP.Middleware.Connector.RfcInvalidStateException: Cannot get destination MONPLAT -- no destination configuration registered
+   at SAP.Middleware.Connector.RfcDestinationManager.GetDestination(String destinationName) in D:\depot\bas\789_REL\gen\optU\ntamd64\krn\rfc\nco3\krn\rfc\nco3\sapnco\RfcDestinationManager.cs:line 582
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Object[] arguments, Signature sig, Boolean constructor)
+   at System.Reflection.RuntimeMethodInfo.UnsafeInvokeInternal(Object obj, Object[] parameters, Object[] arguments)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+   at System.Reflection.MethodBase.Invoke(Object obj, Object[] parameters)
+   at MonPlatPrenos.Worker.Services.SapDllSapClient.GetDestination() in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\SapDllSapClient.cs:line 373
+   at MonPlatPrenos.Worker.Services.SapDllSapClient.CreateFunction(String functionName) in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\SapDllSapClient.cs:line 352
+   at MonPlatPrenos.Worker.Services.SapDllSapClient.GetProductionOrdersForPlatesAsync(String plant, String schedulerCode, String materialFrom, String materialTo, String orderFrom, CancellationToken cancellationToken) in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\SapDllSapClient.cs:line 105
+   at MonPlatPrenos.Worker.Services.PrenosJob.<RunAsync>d__5.MoveNext() in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\PrenosJob.cs:line 40
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder.Start[TStateMachine](TStateMachine& stateMachine)
+   at MonPlatPrenos.Worker.Services.PrenosJob.RunAsync(Nullable`1 forDate, CancellationToken cancellationToken)
+   at MonPlatPrenos.Worker.Services.PrenosJob.RunAsync(CancellationToken cancellationToken) in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\PrenosJob.cs:line 29
+   at MonPlatPrenos.Worker.Program.<Main>d__0.MoveNext() in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Program.cs:line 71
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.Start[TStateMachine](TStateMachine& stateMachine)
+   at MonPlatPrenos.Worker.Program.Main(String[] args)
+   at MonPlatPrenos.Worker.Program.<Main>(String[] args)
+
+**** Log file opened by process 12380 at 2026-03-10 12:32:18 (UTC+01:00 Zahodnoevropski standardni čas)
+
+SAP .NET Connector 3.1 with file version 3.1.6.0 running on 64-bit .NET Framework 4.0.30319.42000
+Program: C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\bin\Debug\net48\MonPlatPrenos.Worker.exe
+Working directory: C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker
+Trace directory: .\
+Trace encoding: utf-8
+Operating system: Windows 10 Professional 64-bit 
+Processor: 12x AMD64 (or x64)
+SAP release: 789, Kernel release: 789, Kernel patch level: 413
+Hostname: CL003240, IP address: 10.5.0.102, IP_v6 address: 
+Locale: sl-SI (number decimal separator: ",", number group separator: ".", negative sign: "-")
+
+Default trace level: None
+
+>> Error entry 2026-03-10 12:32:18.324 [Thread 1]
+SAP.Middleware.Connector.RfcInvalidStateException: Cannot get destination MONPLAT -- no destination configuration registered
+   at SAP.Middleware.Connector.RfcDestinationManager.GetDestination(String destinationName) in D:\depot\bas\789_REL\gen\optU\ntamd64\krn\rfc\nco3\krn\rfc\nco3\sapnco\RfcDestinationManager.cs:line 582
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Object[] arguments, Signature sig, Boolean constructor)
+   at System.Reflection.RuntimeMethodInfo.UnsafeInvokeInternal(Object obj, Object[] parameters, Object[] arguments)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+   at System.Reflection.MethodBase.Invoke(Object obj, Object[] parameters)
+   at MonPlatPrenos.Worker.Services.SapDllSapClient.GetDestination() in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\SapDllSapClient.cs:line 373
+   at MonPlatPrenos.Worker.Services.SapDllSapClient.CreateFunction(String functionName) in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\SapDllSapClient.cs:line 352
+   at MonPlatPrenos.Worker.Services.SapDllSapClient.GetProductionOrdersForPlatesAsync(String plant, String schedulerCode, String materialFrom, String materialTo, String orderFrom, CancellationToken cancellationToken) in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\SapDllSapClient.cs:line 105
+   at MonPlatPrenos.Worker.Services.PrenosJob.<RunAsync>d__5.MoveNext() in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\PrenosJob.cs:line 40
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder.Start[TStateMachine](TStateMachine& stateMachine)
+   at MonPlatPrenos.Worker.Services.PrenosJob.RunAsync(Nullable`1 forDate, CancellationToken cancellationToken)
+   at MonPlatPrenos.Worker.Services.PrenosJob.RunAsync(CancellationToken cancellationToken) in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Services\PrenosJob.cs:line 29
+   at MonPlatPrenos.Worker.Program.<Main>d__0.MoveNext() in C:\source\mon-plat-prenos\dotnet-app\MonPlatPrenos.Worker\Program.cs:line 71
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.Start[TStateMachine](TStateMachine& stateMachine)
+   at MonPlatPrenos.Worker.Program.Main(String[] args)
+   at MonPlatPrenos.Worker.Program.<Main>(String[] args)
