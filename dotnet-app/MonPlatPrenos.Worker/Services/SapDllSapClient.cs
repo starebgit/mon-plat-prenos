@@ -29,8 +29,30 @@ public sealed class SapDllSapClient : ISapClient
             throw new FileNotFoundException($"SA utils library not found: {_saUtilsDllFullPath}");
         }
 
-        _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
-        Assembly.LoadFrom(_saUtilsDllFullPath);
+        if (!Environment.Is64BitProcess)
+        {
+            throw new InvalidOperationException("SAP NCo requires a 64-bit process. Configure the worker to run as x64.");
+        }
+
+        try
+        {
+            _sapAssembly = Assembly.LoadFrom(_sapDllFullPath);
+            Assembly.LoadFrom(_saUtilsDllFullPath);
+        }
+        catch (BadImageFormatException ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to load SAP assemblies due to architecture mismatch. Process is {(Environment.Is64BitProcess ? "x64" : "x86")}. " +
+                $"Configured SAP assemblies: '{_sapDllFullPath}' and '{_saUtilsDllFullPath}'. Ensure both are x64 SAP NCo binaries.",
+                ex);
+        }
+        catch (FileLoadException ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to load SAP assemblies. A dependent module is missing or incompatible for '{ex.FileName}'. " +
+                "Ensure SAP NCo dependencies are installed (for example required Visual C++ runtime) and that sapnco/sapnco_utils versions match.",
+                ex);
+        }
 
         logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}", _sapDllFullPath, _saUtilsDllFullPath);
     }

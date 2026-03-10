@@ -113,6 +113,9 @@ dotnet-app/MonPlatPrenos.Worker/lib/sapnco_utils.dll
 
 4. Run app. It will load both assemblies via `SapDllSapClient`.
 
+5. Use **x64** SAP NCo binaries and run the worker as **x64** (the project sets `PlatformTarget` to `x64`).
+   If you still get `The specified module could not be found`, that usually means a missing native dependency (commonly Visual C++ runtime) or mismatched `sapnco`/`sapnco_utils` versions.
+
 ### Important: what is ready vs not ready
 
 - ✅ **Ready now**:
