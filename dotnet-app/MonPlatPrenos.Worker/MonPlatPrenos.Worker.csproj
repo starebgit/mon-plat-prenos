@@ -15,8 +15,14 @@
 
 
   <ItemGroup>
-    <None Update="lib\*.dll">
+    <Reference Include="sapnco">
+      <HintPath>lib\sapnco.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+
+    <Content Include="lib\sapnco_utils.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+      <TargetPath>sapnco_utils.dll</TargetPath>
+    </Content>
   </ItemGroup>
 </Project>
