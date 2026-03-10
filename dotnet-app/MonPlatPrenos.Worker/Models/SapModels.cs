@@ -1,3 +1,4 @@
+using System;
 namespace MonPlatPrenos.Worker.Models;
 
 public sealed record SapOrderHeader(

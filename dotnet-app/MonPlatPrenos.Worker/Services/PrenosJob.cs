@@ -1,3 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json;
 using MonPlatPrenos.Worker.Models;
@@ -5,26 +12,32 @@ using Microsoft.Extensions.Options;
 
 namespace MonPlatPrenos.Worker.Services;
 
-public sealed class PrenosJob(
-    ISapClient sapClient,
-    IOptions<PrenosOptions> options,
-    ILogger<PrenosJob> logger)
+public sealed class PrenosJob
 {
-    private readonly PrenosOptions _options = options.Value;
+    private readonly ISapClient _sapClient;
+    private readonly PrenosOptions _options;
+    private readonly ILogger<PrenosJob> _logger;
+
+    public PrenosJob(ISapClient sapClient, IOptions<PrenosOptions> options, ILogger<PrenosJob> logger)
+    {
+        _sapClient = sapClient;
+        _options = options.Value;
+        _logger = logger;
+    }
 
     public Task RunAsync(CancellationToken cancellationToken)
         => RunAsync(forDate: null, cancellationToken);
 
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
-        logger.LogInformation("Starting prenos job at {Time}. Date filter: {DateFilter}", DateTimeOffset.Now, forDate?.ToString("yyyy-MM-dd") ?? "<none>");
+        _logger.LogInformation("Starting prenos job at {Time}. Date filter: {DateFilter}", DateTimeOffset.Now, forDate?.ToString("yyyy-MM-dd") ?? "<none>");
 
         var plant = "1061";
         var orderFrom = "000005223286";
 
         var stats = new ProcessingStats();
 
-        var orders = await sapClient.GetProductionOrdersForPlatesAsync(
+        var orders = await _sapClient.GetProductionOrdersForPlatesAsync(
             plant,
             _options.SchedulerCode,
             _options.PlateMaterialFrom,
@@ -59,9 +72,9 @@ public sealed class PrenosJob(
             }
 
             stats.OrdersAfterCoreFilters++;
-            var operations = await sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken);
+            var operations = await _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken);
             var validOperations = operations
-                .Where(o => _options.OperationCodes.Contains(o.OperationCode, StringComparer.OrdinalIgnoreCase))
+                .Where(o => _options.OperationCodes.Any(code => string.Equals(code, o.OperationCode, StringComparison.OrdinalIgnoreCase)))
                 .Where(o => o.ConfirmableQty > 0)
                 .Where(o => o.StepCode == "0010")
                 .ToList();
@@ -72,7 +85,7 @@ public sealed class PrenosJob(
             var totalYield = 0;
             foreach (var op in validOperations)
             {
-                var confirmations = await sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
+                var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
                 stats.ConfirmationRowsRead += confirmations.Count;
                 totalYield += confirmations.Sum(c => c.Yield);
             }
@@ -88,7 +101,7 @@ public sealed class PrenosJob(
             plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, order.Material, missingQty, order.StartDate));
             stats.PlateRecordsWritten++;
 
-            var components = await sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken);
+            var components = await _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken);
             var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
             stats.ComponentRowsRead += components.Count;
 
@@ -131,7 +144,7 @@ public sealed class PrenosJob(
 
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
 
-        logger.LogInformation(
+        _logger.LogInformation(
             "Summary: fetched={Fetched}, dateSkip={DateSkip}, statusSkip={StatusSkip}, materialSkip={MaterialSkip}, afterCore={AfterCore}, validOps={ValidOps}/{OpsRead}, confRows={ConfRows}, missingQtySkip={MissingSkip}, componentsRead={ComponentsRead}, plateOut={PlateOut}, unifiedOut={UnifiedOut}, semiOut={SemiOut}",
             stats.TotalOrdersFetched,
             stats.SkippedByDateFilter,
@@ -149,10 +162,10 @@ public sealed class PrenosJob(
 
         foreach (var hit in stats.CategoryHits.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Category hit: {Category}={Count}", hit.Key, hit.Value);
+            _logger.LogInformation("Category hit: {Category}={Count}", hit.Key, hit.Value);
         }
 
-        logger.LogInformation("Finished prenos job. Plate records: {PlateCount}, Unified items: {UnifiedCount}, Semi-finished traces: {SemiCount}", plateDemands.Count, unified.Count, semiFinished.Count);
+        _logger.LogInformation("Finished prenos job. Plate records: {PlateCount}, Unified items: {UnifiedCount}, Semi-finished traces: {SemiCount}", plateDemands.Count, unified.Count, semiFinished.Count);
     }
 
     private async Task ObdelajSamotAsync(
@@ -183,10 +196,10 @@ public sealed class PrenosJob(
     {
         if (depth > 2)
         {
-            return [];
+            return Array.Empty<SapOrderHeader>();
         }
 
-        var subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
+        var subOrders = await _sapClient.GetProductionOrdersByMaterialAsync(
             plateOrder.Plant,
             semiComponent.Material,
             plateOrder.OrderNumber,
@@ -194,7 +207,7 @@ public sealed class PrenosJob(
 
         if (subOrders.Count == 0)
         {
-            subOrders = await sapClient.GetProductionOrdersByMaterialAsync(
+            subOrders = await _sapClient.GetProductionOrdersByMaterialAsync(
                 plateOrder.Plant,
                 semiComponent.Material,
                 null,
@@ -203,7 +216,7 @@ public sealed class PrenosJob(
 
         foreach (var subOrder in subOrders)
         {
-            var afruDelta = await sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken);
+            var afruDelta = await _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken);
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
@@ -239,18 +252,18 @@ public sealed class PrenosJob(
         ProcessingStats stats,
         CancellationToken cancellationToken)
     {
-        var components = await sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken);
+        var components = await _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken);
         stats.ComponentRowsRead += components.Count;
 
         foreach (var cmp in components)
         {
-            if (cmp.Description.Contains("ULITEK", StringComparison.OrdinalIgnoreCase))
+            if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, cancellationToken, depth: 1);
                 continue;
             }
 
-            if (cmp.Description.Contains("SPIRALA", StringComparison.OrdinalIgnoreCase))
+            if (cmp.Description.IndexOf("SPIRALA", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 semiFinished.Add(new SemiFinishedTrace(
                     plateOrder.OrderNumber,
@@ -295,9 +308,13 @@ public sealed class PrenosJob(
 
         public void AddCategoryHit(string category)
         {
-            if (!CategoryHits.TryAdd(category, 1))
+            if (CategoryHits.ContainsKey(category))
             {
                 CategoryHits[category] += 1;
+            }
+            else
+            {
+                CategoryHits.Add(category, 1);
             }
         }
     }
@@ -314,13 +331,13 @@ public sealed class PrenosJob(
         var platePath = Path.Combine(_options.OutputDirectory, $"plates-{stamp}.json");
         var unifiedPath = Path.Combine(_options.OutputDirectory, $"unified-{stamp}.json");
 
-        await File.WriteAllTextAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
-        await File.WriteAllTextAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await WriteAllTextCompatAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await WriteAllTextCompatAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
 
         if (_options.EnableDebugJson)
         {
             var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
-            await File.WriteAllTextAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+            await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         }
 
         if (_options.EnableDebugTextDump)
@@ -347,8 +364,17 @@ public sealed class PrenosJob(
                 sb.AppendLine($"{s.PlateOrder};{s.Category};Semi={s.SemiMaterial};Order={s.SemiOrder};AFRU={s.AfruYieldDelta}");
             }
 
-            await File.WriteAllTextAsync(textPath, sb.ToString(), cancellationToken);
+            await WriteAllTextCompatAsync(textPath, sb.ToString(), cancellationToken);
         }
+    }
+
+    private static Task WriteAllTextCompatAsync(string path, string content, CancellationToken cancellationToken)
+    {
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            File.WriteAllText(path, content);
+        }, cancellationToken);
     }
 
     private static int ParseTrack(string trackCode)
