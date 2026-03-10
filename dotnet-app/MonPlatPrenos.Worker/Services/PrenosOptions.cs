@@ -17,9 +17,9 @@ public sealed class PrenosOptions
 
 public sealed class SapIntegrationOptions
 {
-    public bool UseMock { get; set; } = true;
-    public string SapDllPath { get; set; } = "lib/sap.dll";
-    public string SaUtilsDllPath { get; set; } = "lib/sa_utils.dll";
+    public bool UseMock { get; set; } = false;
+    public string SapDllPath { get; set; } = "lib/sapnco.dll";
+    public string SaUtilsDllPath { get; set; } = "lib/sapnco_utils.dll";
 }
 
 public sealed class TermRule
