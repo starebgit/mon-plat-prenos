@@ -26,6 +26,8 @@ public sealed class SapDllSapClient : ISapClient
         public string Language { get; set; } = string.Empty;
         public string PasswordMasked { get; set; } = string.Empty;
         public bool IsComplete { get; set; }
+        public string LoginSource { get; set; } = string.Empty;
+        public string LoginMessage { get; set; } = string.Empty;
     }
     private readonly string _sapDllFullPath;
     private readonly string _saUtilsDllFullPath;
@@ -33,6 +35,8 @@ public sealed class SapDllSapClient : ISapClient
     private readonly Assembly _sapAssembly;
     private readonly Assembly _sapUtilsAssembly;
     private readonly SapIntegrationOptions _options;
+    private string _loginSource = "config";
+    private string _loginMessage = "Using direct Prenos:Sap values if provided.";
 
     public SapDllSapClient(SapIntegrationOptions options, ILogger<SapDllSapClient> logger)
     {
@@ -480,11 +484,15 @@ public sealed class SapDllSapClient : ISapClient
     {
         if (HasInlineDestinationConfig())
         {
+            _loginSource = "config";
+            _loginMessage = "Inline SAP values are already present; DB lookup skipped.";
             return;
         }
 
         if (string.IsNullOrWhiteSpace(_options.SapLoginConnectionString))
         {
+            _loginSource = "none";
+            _loginMessage = "SapLoginConnectionString is empty; DB lookup skipped.";
             _logger.LogInformation("SapLoginConnectionString is empty; skipping DB login lookup.");
             return;
         }
@@ -511,6 +519,8 @@ public sealed class SapDllSapClient : ISapClient
                     {
                         if (reader is null || !reader.Read())
                         {
+                            _loginSource = "db";
+                            _loginMessage = string.Format(CultureInfo.InvariantCulture, "No row found in table prijava for ident={0}.", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni='X'>");
                             _logger.LogWarning("No SAP login row found in table prijava (ident={Ident}).", _options.SapLoginIdent);
                             return;
                         }
@@ -535,15 +545,21 @@ public sealed class SapDllSapClient : ISapClient
 
             if (HasInlineDestinationConfig())
             {
+                _loginSource = "db";
+                _loginMessage = "Loaded SAP login values from table prijava.";
                 _logger.LogInformation("Loaded SAP login from DB for destination {DestinationName}.", _options.DestinationName);
             }
             else
             {
+                _loginSource = "db";
+                _loginMessage = "DB lookup executed, but required fields are still incomplete.";
                 _logger.LogWarning("SAP login lookup from DB succeeded but required fields are still incomplete.");
             }
         }
         catch (Exception ex)
         {
+            _loginSource = "db";
+            _loginMessage = string.Format(CultureInfo.InvariantCulture, "DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message);
             _logger.LogWarning(ex, "Failed to load SAP login from DB.");
         }
     }
@@ -588,7 +604,9 @@ public sealed class SapDllSapClient : ISapClient
             User = _options.User ?? string.Empty,
             Language = _options.Language ?? string.Empty,
             PasswordMasked = masked,
-            IsComplete = HasInlineDestinationConfig()
+            IsComplete = HasInlineDestinationConfig(),
+            LoginSource = _loginSource,
+            LoginMessage = _loginMessage
         };
     }
 

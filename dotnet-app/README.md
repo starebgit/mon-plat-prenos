@@ -34,6 +34,8 @@ dotnet run
 
 `--run-once` is intentionally simplified now: it only loads SAP login info (from direct `Prenos:Sap` settings or DB lookup), prints it (`RUN-ONCE LOGIN CHECK`), and exits.
 
+It prints `LoginSource` and `LoginMessage` so you can see why values are empty (for example missing connection string, DB query returned no rows, or DB exception).
+
 ## Configure new terms
 
 `Prenos:EnableDebugJson` controls whether semi-finished debug traces are written to JSON.
@@ -316,3 +318,6 @@ The Delphi app writes transfer data into Access/ADO tables defined through `Mont
 - `Zadprenos` (run timestamp marker).
 
 Useful daily checks in the legacy DB are based on `plosce.danstart` (orders per day) and the latest record in `Zadprenos` (last transfer execution).
+
+
+If you still see very verbose host lines (Roslyn/corehost), that output usually comes from environment variables like `COREHOST_TRACE` set in your shell, not from app logging.

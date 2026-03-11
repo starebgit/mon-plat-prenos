@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,6 +68,8 @@ public static class Program
                     Console.WriteLine($"Language      : {login.Language}");
                     Console.WriteLine($"Password      : {login.PasswordMasked}");
                     Console.WriteLine($"IsComplete    : {login.IsComplete}");
+                    Console.WriteLine($"LoginSource   : {login.LoginSource}");
+                    Console.WriteLine($"LoginMessage  : {login.LoginMessage}");
                 }
                 else
                 {
