@@ -38,8 +38,7 @@ public static class Program
                         return new MockSapClient();
                     }
 
-                    var logger = sp.GetRequiredService<ILogger<SapDllSapClient>>();
-                    return new SapDllSapClient(options.Sap, logger);
+                    return new SapDllSapClient(options.Sap);
                 });
 
                 services.AddSingleton<PrenosJob>();

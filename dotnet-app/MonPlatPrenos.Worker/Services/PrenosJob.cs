@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json;
 using MonPlatPrenos.Worker.Models;
@@ -16,13 +15,10 @@ public sealed class PrenosJob
 {
     private readonly ISapClient _sapClient;
     private readonly PrenosOptions _options;
-    private readonly ILogger<PrenosJob> _logger;
-
-    public PrenosJob(ISapClient sapClient, IOptions<PrenosOptions> options, ILogger<PrenosJob> logger)
+    public PrenosJob(ISapClient sapClient, IOptions<PrenosOptions> options)
     {
         _sapClient = sapClient;
         _options = options.Value;
-        _logger = logger;
     }
 
     public Task RunAsync(CancellationToken cancellationToken)
@@ -30,7 +26,6 @@ public sealed class PrenosJob
 
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Starting prenos job at {Time}. Date filter: {DateFilter}", DateTimeOffset.Now, forDate?.ToString("yyyy-MM-dd") ?? "<none>");
 
         var plant = "1061";
         var orderFrom = "000005223286";
@@ -143,29 +138,6 @@ public sealed class PrenosJob
         }
 
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
-
-        _logger.LogInformation(
-            "Summary: fetched={Fetched}, dateSkip={DateSkip}, statusSkip={StatusSkip}, materialSkip={MaterialSkip}, afterCore={AfterCore}, validOps={ValidOps}/{OpsRead}, confRows={ConfRows}, missingQtySkip={MissingSkip}, componentsRead={ComponentsRead}, plateOut={PlateOut}, unifiedOut={UnifiedOut}, semiOut={SemiOut}",
-            stats.TotalOrdersFetched,
-            stats.SkippedByDateFilter,
-            stats.SkippedByStatus,
-            stats.SkippedByMaterialRule,
-            stats.OrdersAfterCoreFilters,
-            stats.ValidOperations,
-            stats.OperationRowsRead,
-            stats.ConfirmationRowsRead,
-            stats.SkippedByMissingQty,
-            stats.ComponentRowsRead,
-            stats.PlateRecordsWritten,
-            stats.UnifiedRowsWritten,
-            stats.SemiFinishedRowsWritten);
-
-        foreach (var hit in stats.CategoryHits.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation("Category hit: {Category}={Count}", hit.Key, hit.Value);
-        }
-
-        _logger.LogInformation("Finished prenos job. Plate records: {PlateCount}, Unified items: {UnifiedCount}, Semi-finished traces: {SemiCount}", plateDemands.Count, unified.Count, semiFinished.Count);
     }
 
     private async Task ObdelajSamotAsync(

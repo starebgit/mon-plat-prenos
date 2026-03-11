@@ -2,7 +2,6 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace MonPlatPrenos.Worker.Services;
@@ -11,19 +10,14 @@ public sealed class SchedulerWorker : BackgroundService
 {
     private readonly PrenosJob _job;
     private readonly PrenosOptions _options;
-    private readonly ILogger<SchedulerWorker> _logger;
-
-    public SchedulerWorker(PrenosJob job, IOptions<PrenosOptions> options, ILogger<SchedulerWorker> logger)
+    public SchedulerWorker(PrenosJob job, IOptions<PrenosOptions> options)
     {
         _job = job;
         _options = options.Value;
-        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Scheduler worker running.");
-
         while (!stoppingToken.IsCancellationRequested)
         {
             var next = GetNextRun(DateTime.Now, _options.DailyRunTime);
@@ -31,7 +25,6 @@ public sealed class SchedulerWorker : BackgroundService
 
             if (delay > TimeSpan.Zero)
             {
-                _logger.LogInformation("Next run at {NextRun} (in {Delay}).", next, delay);
                 await Task.Delay(delay, stoppingToken);
             }
 
@@ -44,9 +37,8 @@ public sealed class SchedulerWorker : BackgroundService
             {
                 await _job.RunAsync(stoppingToken);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogError(ex, "Job run failed.");
             }
         }
     }

@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
@@ -31,19 +30,17 @@ public sealed class SapDllSapClient : ISapClient
     }
     private readonly string _sapDllFullPath;
     private readonly string _saUtilsDllFullPath;
-    private readonly ILogger<SapDllSapClient> _logger;
     private readonly Assembly _sapAssembly;
     private readonly Assembly _sapUtilsAssembly;
     private readonly SapIntegrationOptions _options;
     private string _loginSource = "config";
     private string _loginMessage = "Using direct Prenos:Sap values if provided.";
 
-    public SapDllSapClient(SapIntegrationOptions options, ILogger<SapDllSapClient> logger)
+    public SapDllSapClient(SapIntegrationOptions options)
     {
         _options = options;
         _sapDllFullPath = ResolveSapPath(options.SapDllPath, "sapnco.dll");
         _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath, "sapnco_utils.dll");
-        _logger = logger;
 
         if (!File.Exists(_sapDllFullPath))
         {
@@ -87,7 +84,6 @@ public sealed class SapDllSapClient : ISapClient
                 ex);
         }
 
-        logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}. Loaded assemblies: {SapAsm}, {UtilsAsm}", _sapDllFullPath, _saUtilsDllFullPath, _sapAssembly.FullName, _sapUtilsAssembly.FullName);
 
         TryLoadSapLoginFromDatabase();
         RegisterDestinationConfigurationIfConfigured();
@@ -98,13 +94,10 @@ public sealed class SapDllSapClient : ISapClient
     {
         private Assembly _sapAssembly = null!;
         private SapIntegrationOptions _options = null!;
-        private ILogger? _logger;
-
-        public void Initialize(Assembly sapAssembly, SapIntegrationOptions options, ILogger logger)
+        public void Initialize(Assembly sapAssembly, SapIntegrationOptions options)
         {
             _sapAssembly = sapAssembly;
             _options = options;
-            _logger = logger;
         }
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
@@ -147,7 +140,6 @@ public sealed class SapDllSapClient : ISapClient
                     SetParam(instance, "SAPRouter", _options.Router);
                 }
 
-                _logger?.LogInformation("Providing SAP parameters for destination {DestinationName}.", expectedName);
                 return instance;
             }
 
@@ -244,8 +236,6 @@ public sealed class SapDllSapClient : ISapClient
                 mappedPlant.Trim()));
         }
 
-        _logger.LogInformation("BAPI_PRODORD_GET_LIST returned {Count} ORDER_HEADER rows.", results.Count);
-        _logger.LogInformation("Mapped ORDER_HEADER fields used: ORDER_NUMBER, MATERIAL(_EXTERNAL/_LONG), SYSTEM_STATUS, TARGET_QUANTITY, START_DATE, PROD_SCHED/PROD_SCHEDULER, PRODUCTION_PLANT/PLANT.");
 
         return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
     }
@@ -281,8 +271,6 @@ public sealed class SapDllSapClient : ISapClient
                 stepCode.Trim()));
         }
 
-        _logger.LogInformation("BAPI_PRODORD_GET_DETAIL returned {Count} OPERATION rows for order {OrderNumber}.", results.Count, orderNumber);
-        _logger.LogInformation("Mapped OPERATION fields used: CONF_NO/CONFIRMATION, OPR/ACTIVITY, OPER/VORNR, QUANTITY/CONFIRMABLE_QTY.");
 
         return Task.FromResult<IReadOnlyList<SapOperation>>(results);
     }
@@ -317,8 +305,6 @@ public sealed class SapDllSapClient : ISapClient
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
 
-        _logger.LogInformation("BAPI_PRODORDCONF_GETLIST/GETDETAIL returned {Count} confirmations for order {OrderNumber}, confirmation {Confirmation}.", results.Count, orderNumber, confirmation);
-        _logger.LogInformation("Mapped CONFIRMATIONS/CONF_DETAIL fields used: CONF_NO/CONFIRMATION, CONF_CNT/CONFIRMATION_COUNTER, YIELD.");
 
         return Task.FromResult<IReadOnlyList<SapConfirmation>>(results);
     }
@@ -350,8 +336,6 @@ public sealed class SapDllSapClient : ISapClient
                 description.Trim()));
         }
 
-        _logger.LogInformation("BAPI_PRODORD_GET_DETAIL returned {Count} COMPONENT rows for order {OrderNumber}.", results.Count, orderNumber);
-        _logger.LogInformation("Mapped COMPONENT fields used: MATERIAL/MATERIAL_LONG/MATERIAL_EXTERNAL, MATERIAL_DESCRIPTION/DESCRIPTION.");
 
         return Task.FromResult<IReadOnlyList<SapComponent>>(results);
     }
@@ -614,7 +598,6 @@ public sealed class SapDllSapClient : ISapClient
     {
         if (!HasInlineDestinationConfig())
         {
-            _logger.LogInformation("SAP destination provider not registered (DestinationName={DestinationName} only).", _options.DestinationName);
             return;
         }
 
@@ -645,21 +628,14 @@ public sealed class SapDllSapClient : ISapClient
             throw new InvalidOperationException("Created SAP destination proxy has unexpected runtime type.");
         }
 
-        impl.Initialize(_sapAssembly, _options, _logger);
+        impl.Initialize(_sapAssembly, _options);
 
         try
         {
             registerMethod.Invoke(null, new object[] { proxy });
-            _logger.LogInformation("Registered inline SAP destination configuration for {DestinationName} ({Host}/{SystemNumber}/{Client}/{Language}).",
-                _options.DestinationName,
-                _options.AppServerHost,
-                _options.SystemNumber,
-                _options.Client,
-                _options.Language ?? "EN");
         }
         catch (TargetInvocationException ex)
         {
-            _logger.LogWarning(ex.InnerException ?? ex, "RegisterDestinationConfiguration failed. Continuing, assuming an external SAP destination config is already available.");
         }
     }
 
