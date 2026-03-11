@@ -590,6 +590,18 @@ public sealed class SapDllSapClient : ISapClient
                      ?? throw new InvalidOperationException($"Could not find Append() for table {tableName}.");
         append.Invoke(table, null);
 
+        if (TrySetFieldOnTable(table, "SIGN", "I")
+            && TrySetFieldOnTable(table, "OPTION", option)
+            && TrySetFieldOnTable(table, "LOW", low))
+        {
+            if (!string.IsNullOrWhiteSpace(high))
+            {
+                TrySetFieldOnTable(table, "HIGH", high);
+            }
+
+            return;
+        }
+
         var currentRow = table.GetType().GetProperty("CurrentRow")?.GetValue(table);
         if (currentRow is null)
         {
@@ -619,6 +631,18 @@ public sealed class SapDllSapClient : ISapClient
         {
             SetField(currentRow, "HIGH", high);
         }
+    }
+
+    private static bool TrySetFieldOnTable(object table, string fieldName, string value)
+    {
+        var setValue = table.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) });
+        if (setValue is null)
+        {
+            return false;
+        }
+
+        setValue.Invoke(table, new object[] { fieldName, value });
+        return true;
     }
 
     private static void SetImport(object function, string importName, string value)
