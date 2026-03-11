@@ -33,17 +33,21 @@ public sealed class PrenosJob
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
+        var timing = new TimingCollector(Math.Max(1, _options.TimingSampleLimit));
         var operationCodes = new HashSet<string>(_options.OperationCodes, StringComparer.OrdinalIgnoreCase);
         var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
 
         RenderSingleLineStatus("Fetching production orders from SAP...");
-        var orders = await _sapClient.GetProductionOrdersForPlatesAsync(
-            plant,
-            _options.SchedulerCode,
-            _options.PlateMaterialFrom,
-            _options.PlateMaterialTo,
-            orderFrom,
-            cancellationToken);
+        var orders = await TimedAsync(
+            timing,
+            "GetProductionOrdersForPlates",
+            () => _sapClient.GetProductionOrdersForPlatesAsync(
+                plant,
+                _options.SchedulerCode,
+                _options.PlateMaterialFrom,
+                _options.PlateMaterialTo,
+                orderFrom,
+                cancellationToken));
 
         stats.TotalOrdersFetched = orders.Count;
         RenderSingleLineStatus($"Fetched {orders.Count} production orders. Processing...");
@@ -77,7 +81,7 @@ public sealed class PrenosJob
             }
 
             stats.OrdersAfterCoreFilters++;
-            var operations = await _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken);
+            var operations = await TimedAsync(timing, "GetOperations", () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
             var validOperations = operations
                 .Where(o => operationCodes.Contains(o.OperationCode))
                 .Where(o => o.ConfirmableQty > 0)
@@ -99,7 +103,7 @@ public sealed class PrenosJob
                         TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
                     }
 
-                    var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
+                    var confirmations = await TimedAsync(timing, "GetConfirmations", () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
                     stats.ConfirmationRowsRead += confirmations.Count;
                     totalYield += confirmations.Sum(c => c.Yield);
                 }
@@ -117,7 +121,7 @@ public sealed class PrenosJob
                             TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
                         }
 
-                        var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken).ConfigureAwait(false);
+                        var confirmations = await TimedAsync(timing, "GetConfirmations", () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
                         return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
                     }
                     finally
@@ -149,7 +153,7 @@ public sealed class PrenosJob
             plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
             stats.PlateRecordsWritten++;
 
-            var components = await _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken);
+            var components = await TimedAsync(timing, "GetComponents", () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
             stats.ComponentRowsRead += components.Count;
 
             foreach (var component in components)
@@ -175,13 +179,13 @@ public sealed class PrenosJob
 
                     if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ObdelajSamotAsync(order, component, semiFinished, unified, stats, cancellationToken);
+                        await ObdelajSamotAsync(order, component, semiFinished, unified, stats, timing, cancellationToken);
                     }
                     else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
                              || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
                              || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ObdelajPolIzdAsync(order, component, rule.Name, semiFinished, unified, stats, cancellationToken, depth: 0);
+                        await ObdelajPolIzdAsync(order, component, rule.Name, semiFinished, unified, stats, timing, cancellationToken, depth: 0);
                     }
 
                     break;
@@ -193,6 +197,7 @@ public sealed class PrenosJob
         Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
 
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
+        await WriteTimingLogAsync(timing, cancellationToken);
     }
 
     private async Task ObdelajSamotAsync(
@@ -201,13 +206,14 @@ public sealed class PrenosJob
         ICollection<SemiFinishedTrace> semiFinished,
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
+        TimingCollector timing,
         CancellationToken cancellationToken)
     {
-        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, cancellationToken, depth: 0);
+        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, cancellationToken, depth: 0);
 
         foreach (var samotOrder in samotOrders)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, cancellationToken);
         }
     }
 
@@ -218,6 +224,7 @@ public sealed class PrenosJob
         ICollection<SemiFinishedTrace> semiFinished,
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
+        TimingCollector timing,
         CancellationToken cancellationToken,
         int depth)
     {
@@ -226,24 +233,30 @@ public sealed class PrenosJob
             return Array.Empty<SapOrderHeader>();
         }
 
-        var subOrders = await _sapClient.GetProductionOrdersByMaterialAsync(
-            plateOrder.Plant,
-            semiComponent.Material,
-            plateOrder.OrderNumber,
-            cancellationToken);
+        var subOrders = await TimedAsync(
+            timing,
+            "GetProductionOrdersByMaterial",
+            () => _sapClient.GetProductionOrdersByMaterialAsync(
+                plateOrder.Plant,
+                semiComponent.Material,
+                plateOrder.OrderNumber,
+                cancellationToken));
 
         if (subOrders.Count == 0)
         {
-            subOrders = await _sapClient.GetProductionOrdersByMaterialAsync(
-                plateOrder.Plant,
-                semiComponent.Material,
-                null,
-                cancellationToken);
+            subOrders = await TimedAsync(
+                timing,
+                "GetProductionOrdersByMaterialFallback",
+                () => _sapClient.GetProductionOrdersByMaterialAsync(
+                    plateOrder.Plant,
+                    semiComponent.Material,
+                    null,
+                    cancellationToken));
         }
 
         foreach (var subOrder in subOrders)
         {
-            var afruDelta = await _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken);
+            var afruDelta = await TimedAsync(timing, "GetAfruYieldDelta", () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken));
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
@@ -277,16 +290,17 @@ public sealed class PrenosJob
         ICollection<SemiFinishedTrace> semiFinished,
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
+        TimingCollector timing,
         CancellationToken cancellationToken)
     {
-        var components = await _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken);
+        var components = await TimedAsync(timing, "GetComponents", () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
         stats.ComponentRowsRead += components.Count;
 
         foreach (var cmp in components)
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, cancellationToken, depth: 1);
+                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, cancellationToken, depth: 1);
                 continue;
             }
 
@@ -392,6 +406,104 @@ public sealed class PrenosJob
             }
 
             await WriteAllTextCompatAsync(textPath, sb.ToString(), cancellationToken);
+        }
+    }
+
+
+    private async Task WriteTimingLogAsync(TimingCollector timing, CancellationToken cancellationToken)
+    {
+        if (!_options.EnableTimingLog)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_options.OutputDirectory);
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var path = Path.Combine(_options.OutputDirectory, $"prenos-timing-{stamp}.log");
+        await WriteAllTextCompatAsync(path, timing.ToReportText(), cancellationToken);
+    }
+
+    private static async Task<T> TimedAsync<T>(TimingCollector collector, string step, Func<Task<T>> action)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var result = await action().ConfigureAwait(false);
+            collector.Add(step, sw.ElapsedMilliseconds);
+            return result;
+        }
+        catch
+        {
+            collector.Add(step + "(FAIL)", sw.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    private sealed class TimingCollector
+    {
+        private sealed class Item
+        {
+            public long Count;
+            public long TotalMs;
+            public long MaxMs;
+            public readonly List<long> Samples = new List<long>();
+        }
+
+        private readonly object _sync = new object();
+        private readonly int _sampleLimit;
+        private readonly Dictionary<string, Item> _map = new Dictionary<string, Item>(StringComparer.Ordinal);
+
+        public TimingCollector(int sampleLimit)
+        {
+            _sampleLimit = Math.Max(1, sampleLimit);
+        }
+
+        public void Add(string step, long ms)
+        {
+            lock (_sync)
+            {
+                if (!_map.TryGetValue(step, out var item))
+                {
+                    item = new Item();
+                    _map.Add(step, item);
+                }
+
+                item.Count++;
+                item.TotalMs += ms;
+                if (ms > item.MaxMs)
+                {
+                    item.MaxMs = ms;
+                }
+
+                if (item.Samples.Count < _sampleLimit)
+                {
+                    item.Samples.Add(ms);
+                }
+            }
+        }
+
+        public string ToReportText()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Prenos timing report");
+            sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine();
+
+            List<KeyValuePair<string, Item>> entries;
+            lock (_sync)
+            {
+                entries = _map.ToList();
+            }
+
+            foreach (var kv in entries.OrderByDescending(e => e.Value.TotalMs))
+            {
+                var avg = kv.Value.Count == 0 ? 0 : (double)kv.Value.TotalMs / kv.Value.Count;
+                sb.AppendLine($"{kv.Key}");
+                sb.AppendLine($"  calls={kv.Value.Count}, totalMs={kv.Value.TotalMs}, avgMs={avg:F2}, maxMs={kv.Value.MaxMs}");
+                sb.AppendLine($"  firstSamplesMs=[{string.Join(", ", kv.Value.Samples)}]");
+            }
+
+            return sb.ToString();
         }
     }
 
