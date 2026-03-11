@@ -70,6 +70,23 @@ public sealed class SapDllSapClient : ISapClient
         public readonly List<long> Samples = new List<long>();
     }
 
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CountPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> RowIndexerCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByNameCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByNameCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByIndexCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByIndexCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> CreateFunctionCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueNameObjectCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueIndexObjectCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
+
     public SapDllSapClient(SapIntegrationOptions options)
     {
         _options = options;
