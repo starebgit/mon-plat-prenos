@@ -585,10 +585,32 @@ public sealed class SapDllSapClient : ISapClient
     private static void FillRange(object function, string tableName, string option, string low, string? high = null)
     {
         var table = GetTable(function, tableName);
-        table.GetType().GetMethod("Append", Type.EmptyTypes)?.Invoke(table, null);
 
-        var currentRow = table.GetType().GetMethod("CurrentRow", Type.EmptyTypes)?.Invoke(table, null)
-                         ?? throw new InvalidOperationException($"Could not access current row for table {tableName}.");
+        var append = table.GetType().GetMethod("Append", Type.EmptyTypes)
+                     ?? throw new InvalidOperationException($"Could not find Append() for table {tableName}.");
+        append.Invoke(table, null);
+
+        var currentRow = table.GetType().GetProperty("CurrentRow")?.GetValue(table);
+        if (currentRow is null)
+        {
+            var countObj = table.GetType().GetProperty("Count")?.GetValue(table)
+                           ?? throw new InvalidOperationException($"Could not read Count for table {tableName}.");
+            var count = Convert.ToInt32(countObj, CultureInfo.InvariantCulture);
+            if (count <= 0)
+            {
+                throw new InvalidOperationException($"Table {tableName} has no rows after Append().");
+            }
+
+            var getRow = table.GetType().GetMethod("get_Item", new[] { typeof(int) })
+                         ?? throw new InvalidOperationException($"Could not access row indexer for table {tableName}.");
+
+            currentRow = getRow.Invoke(table, new object[] { count - 1 });
+        }
+
+        if (currentRow is null)
+        {
+            throw new InvalidOperationException($"Could not access current row for table {tableName}.");
+        }
 
         SetField(currentRow, "SIGN", "I");
         SetField(currentRow, "OPTION", option);
