@@ -392,16 +392,20 @@ public sealed class SapDllSapClient : ISapClient
             var config = Activator.CreateInstance(configType)
                          ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
 
-            SetParam(config, "Name", string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName);
-            SetParam(config, "AppServerHost", _options.AppServerHost);
-            SetParam(config, "SystemNumber", _options.SystemNumber);
-            SetParam(config, "Client", _options.Client);
-            SetParam(config, "User", _options.User);
-            SetParam(config, "Password", _options.Password);
-            SetParam(config, "Language", string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language);
+            var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
+            var language = string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language;
+
+            // NCo expects technical RfcConfigParameters keys (NAME/ASHOST/SYSNR/CLIENT/USER/PASSWD/LANG/SAPROUTER).
+            SetParam(config, "NAME", destinationName);
+            SetParam(config, "ASHOST", _options.AppServerHost);
+            SetParam(config, "SYSNR", _options.SystemNumber);
+            SetParam(config, "CLIENT", _options.Client);
+            SetParam(config, "USER", _options.User);
+            SetParam(config, "PASSWD", _options.Password);
+            SetParam(config, "LANG", language);
             if (!string.IsNullOrWhiteSpace(_options.Router))
             {
-                SetParam(config, "SAPRouter", _options.Router);
+                SetParam(config, "SAPROUTER", _options.Router);
             }
 
             return getByConfig.Invoke(null, new[] { config })
