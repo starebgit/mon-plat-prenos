@@ -81,8 +81,7 @@ public sealed class PrenosJob
             }
 
             stats.OrdersAfterCoreFilters++;
-            var orderDetail = await TimedAsync(timing, "GetOrderDetailBundle", () => _sapClient.GetOrderDetailAsync(order.OrderNumber, cancellationToken));
-            var operations = orderDetail.Operations;
+            var operations = await TimedAsync(timing, "GetOperations", () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
             var validOperations = operations
                 .Where(o => operationCodes.Contains(o.OperationCode))
                 .Where(o => o.ConfirmableQty > 0)
@@ -154,7 +153,7 @@ public sealed class PrenosJob
             plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
             stats.PlateRecordsWritten++;
 
-            var components = orderDetail.Components;
+            var components = await TimedAsync(timing, "GetComponents", () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
             stats.ComponentRowsRead += components.Count;
 
             foreach (var component in components)
