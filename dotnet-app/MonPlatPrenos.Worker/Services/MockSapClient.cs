@@ -45,6 +45,13 @@ public sealed class MockSapClient : ISapClient
         return Task.FromResult(result);
     }
 
+    public async Task<SapOrderDetail> GetOrderDetailAsync(string orderNumber, CancellationToken cancellationToken)
+    {
+        var operations = await GetOperationsAsync(orderNumber, cancellationToken).ConfigureAwait(false);
+        var components = await GetComponentsAsync(orderNumber, cancellationToken).ConfigureAwait(false);
+        return new SapOrderDetail(operations, components);
+    }
+
     public Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken)
     {
         IReadOnlyList<SapConfirmation> result = new List<SapConfirmation>
