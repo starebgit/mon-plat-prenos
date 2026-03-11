@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Data;
 using System.Data.OleDb;
+using System.Collections.Concurrent;
 using MonPlatPrenos.Worker.Models;
 
 namespace MonPlatPrenos.Worker.Services;
@@ -33,8 +34,28 @@ public sealed class SapDllSapClient : ISapClient
     private readonly Assembly _sapAssembly;
     private readonly Assembly _sapUtilsAssembly;
     private readonly SapIntegrationOptions _options;
+    private readonly object _destinationLock = new object();
+    private object? _cachedDestination;
+    private object? _cachedRepository;
     private string _loginSource = "config";
     private string _loginMessage = "Using direct Prenos:Sap values if provided.";
+
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CountPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> RowIndexerCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByNameCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByNameCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByIndexCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByIndexCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> CreateFunctionCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueNameObjectCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueIndexObjectCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
 
     public SapDllSapClient(SapIntegrationOptions options)
     {
@@ -367,19 +388,51 @@ public sealed class SapDllSapClient : ISapClient
 
     private object CreateFunction(string functionName)
     {
-        var destination = GetDestination();
-        var repository = destination.GetType().GetProperty("Repository")?.GetValue(destination)
-                         ?? throw new InvalidOperationException("SAP destination repository is not available.");
+        var repository = GetRepository();
 
-        var createFunction = repository.GetType().GetMethod("CreateFunction", new[] { typeof(string) })
+        var repositoryType = repository.GetType();
+        var createFunction = CreateFunctionCache.GetOrAdd(repositoryType, t => t.GetMethod("CreateFunction", new[] { typeof(string) }))
                             ?? throw new InvalidOperationException("Could not find Repository.CreateFunction(string).");
 
         return createFunction.Invoke(repository, new object[] { functionName })
                ?? throw new InvalidOperationException($"Failed to create SAP function '{functionName}'.");
     }
 
+    private object GetRepository()
+    {
+        if (_cachedRepository is not null)
+        {
+            return _cachedRepository;
+        }
+
+        lock (_destinationLock)
+        {
+            if (_cachedRepository is not null)
+            {
+                return _cachedRepository;
+            }
+
+            var destination = GetDestination();
+            _cachedRepository = destination.GetType().GetProperty("Repository")?.GetValue(destination)
+                                ?? throw new InvalidOperationException("SAP destination repository is not available.");
+            return _cachedRepository;
+        }
+    }
+
     private object GetDestination()
     {
+        if (_cachedDestination is not null)
+        {
+            return _cachedDestination;
+        }
+
+        lock (_destinationLock)
+        {
+            if (_cachedDestination is not null)
+            {
+                return _cachedDestination;
+            }
+
         if (!HasInlineDestinationConfig())
         {
             throw new InvalidOperationException("SAP destination parameters are incomplete. Expected AppServerHost/SystemNumber/Client/User/Password from config or DB (prijava).");
@@ -418,8 +471,10 @@ public sealed class SapDllSapClient : ISapClient
             SetParam(config, "SAPROUTER", _options.Router);
         }
 
-        return getByConfig.Invoke(null, new[] { config })
-               ?? throw new InvalidOperationException("GetDestination(RfcConfigParameters) returned null.");
+            _cachedDestination = getByConfig.Invoke(null, new[] { config })
+                                ?? throw new InvalidOperationException("GetDestination(RfcConfigParameters) returned null.");
+            return _cachedDestination;
+        }
     }
 
     private string ResolveRuntimeDestinationName()
@@ -581,7 +636,8 @@ public sealed class SapDllSapClient : ISapClient
             return;
         }
 
-        var setValue = configParams.GetType().GetMethod("set_Item", new[] { typeof(string), typeof(string) })
+        var configType = configParams.GetType();
+        var setValue = ConfigSetItemCache.GetOrAdd(configType, t => t.GetMethod("set_Item", new[] { typeof(string), typeof(string) }))
                        ?? throw new InvalidOperationException("RfcConfigParameters indexer setter not found.");
 
         setValue.Invoke(configParams, new object[] { key, value });
@@ -592,7 +648,8 @@ public sealed class SapDllSapClient : ISapClient
     {
         var table = GetTable(function, tableName);
 
-        var append = table.GetType().GetMethod("Append", Type.EmptyTypes)
+        var tableType = table.GetType();
+        var append = AppendMethodCache.GetOrAdd(tableType, t => t.GetMethod("Append", Type.EmptyTypes))
                      ?? throw new InvalidOperationException($"Could not find Append() for table {tableName}.");
         append.Invoke(table, null);
 
@@ -608,10 +665,10 @@ public sealed class SapDllSapClient : ISapClient
             return;
         }
 
-        var currentRow = table.GetType().GetProperty("CurrentRow")?.GetValue(table);
+        var currentRow = CurrentRowPropertyCache.GetOrAdd(tableType, t => t.GetProperty("CurrentRow"))?.GetValue(table);
         if (currentRow is null)
         {
-            var countObj = table.GetType().GetProperty("Count")?.GetValue(table)
+            var countObj = CountPropertyCache.GetOrAdd(tableType, t => t.GetProperty("Count"))?.GetValue(table)
                            ?? throw new InvalidOperationException($"Could not read Count for table {tableName}.");
             var count = Convert.ToInt32(countObj, CultureInfo.InvariantCulture);
             if (count <= 0)
@@ -619,7 +676,7 @@ public sealed class SapDllSapClient : ISapClient
                 throw new InvalidOperationException($"Table {tableName} has no rows after Append().");
             }
 
-            var getRow = table.GetType().GetMethod("get_Item", new[] { typeof(int) })
+            var getRow = RowIndexerCache.GetOrAdd(tableType, t => t.GetMethod("get_Item", new[] { typeof(int) }))
                          ?? throw new InvalidOperationException($"Could not access row indexer for table {tableName}.");
 
             currentRow = getRow.Invoke(table, new object[] { count - 1 });
@@ -641,7 +698,7 @@ public sealed class SapDllSapClient : ISapClient
 
     private static bool TrySetFieldOnTable(object table, string fieldName, string value)
     {
-        var setValue = table.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) });
+        var setValue = SetValueNameObjectCache.GetOrAdd(table.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }));
         if (setValue is null)
         {
             return false;
@@ -653,20 +710,22 @@ public sealed class SapDllSapClient : ISapClient
 
     private static void SetImport(object function, string importName, string value)
     {
-        var setValue = function.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) })
+        var setValue = SetValueNameObjectCache.GetOrAdd(function.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }))
                        ?? throw new InvalidOperationException("Could not find function.SetValue(string, object).");
         setValue.Invoke(function, new object[] { importName, value });
     }
 
     private static void SetOrderObjectsFlag(object function, int preferredIndex, params string[] fieldNames)
     {
-        var getStructure = function.GetType().GetMethod("GetStructure", new[] { typeof(string) })
+        var functionType = function.GetType();
+        var getStructure = GetStructureMethodCache.GetOrAdd(functionType, t => t.GetMethod("GetStructure", new[] { typeof(string) }))
                           ?? throw new InvalidOperationException("Could not find function.GetStructure(string).");
 
         var structure = getStructure.Invoke(function, new object[] { "ORDER_OBJECTS" })
                        ?? throw new InvalidOperationException("ORDER_OBJECTS structure is null.");
 
-        var setValueByIndex = structure.GetType().GetMethod("SetValue", new[] { typeof(int), typeof(object) });
+        var structureType = structure.GetType();
+        var setValueByIndex = SetValueIndexObjectCache.GetOrAdd(structureType, t => t.GetMethod("SetValue", new[] { typeof(int), typeof(object) }));
         if (setValueByIndex is not null)
         {
             foreach (var index in new[] { preferredIndex, preferredIndex - 1 })
@@ -683,7 +742,7 @@ public sealed class SapDllSapClient : ISapClient
             }
         }
 
-        var setValueByName = structure.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) });
+        var setValueByName = SetValueNameObjectCache.GetOrAdd(structureType, t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }));
         if (setValueByName is null)
         {
             throw new InvalidOperationException("Could not find structure.SetValue(string, object) or structure.SetValue(int, object).");
@@ -715,7 +774,7 @@ public sealed class SapDllSapClient : ISapClient
 
     private static object GetStructure(object function, string structureName)
     {
-        var getStructure = function.GetType().GetMethod("GetStructure", new[] { typeof(string) })
+        var getStructure = GetStructureMethodCache.GetOrAdd(function.GetType(), t => t.GetMethod("GetStructure", new[] { typeof(string) }))
                            ?? throw new InvalidOperationException("Could not find function.GetStructure(string).");
 
         return getStructure.Invoke(function, new object[] { structureName })
@@ -724,7 +783,7 @@ public sealed class SapDllSapClient : ISapClient
 
     private static object GetTable(object function, string tableName)
     {
-        var getTable = function.GetType().GetMethod("GetTable", new[] { typeof(string) })
+        var getTable = GetTableMethodCache.GetOrAdd(function.GetType(), t => t.GetMethod("GetTable", new[] { typeof(string) }))
                        ?? throw new InvalidOperationException("Could not find function.GetTable(string).");
 
         return getTable.Invoke(function, new object[] { tableName })
@@ -733,11 +792,13 @@ public sealed class SapDllSapClient : ISapClient
 
     private static IEnumerable<object> EnumerateRows(object table)
     {
-        var countObj = table.GetType().GetProperty("Count")?.GetValue(table)
+        var tableType = table.GetType();
+        var countProperty = CountPropertyCache.GetOrAdd(tableType, t => t.GetProperty("Count"));
+        var countObj = countProperty?.GetValue(table)
                        ?? throw new InvalidOperationException("Could not read SAP table Count.");
         var count = Convert.ToInt32(countObj, CultureInfo.InvariantCulture);
 
-        var getRow = table.GetType().GetMethod("get_Item", new[] { typeof(int) })
+        var getRow = RowIndexerCache.GetOrAdd(tableType, t => t.GetMethod("get_Item", new[] { typeof(int) }))
                      ?? throw new InvalidOperationException("Could not access SAP table row indexer.");
 
         for (var i = 0; i < count; i++)
@@ -754,16 +815,16 @@ public sealed class SapDllSapClient : ISapClient
     {
         var functionType = function.GetType();
 
-        var invokeWithoutParameters = functionType.GetMethod("Invoke", Type.EmptyTypes);
+        var invokeWithoutParameters = InvokeNoArgCache.GetOrAdd(functionType, t => t.GetMethod("Invoke", Type.EmptyTypes));
         if (invokeWithoutParameters is not null)
         {
             invokeWithoutParameters.Invoke(function, null);
             return;
         }
 
-        var invokeWithDestination = functionType
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-            .FirstOrDefault(m => m.Name == "Invoke" && m.GetParameters().Length == 1);
+        var invokeWithDestination = InvokeSingleArgCache.GetOrAdd(functionType,
+            t => t.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                  .FirstOrDefault(m => m.Name == "Invoke" && m.GetParameters().Length == 1));
 
         if (invokeWithDestination is null)
         {
@@ -776,7 +837,7 @@ public sealed class SapDllSapClient : ISapClient
 
     private static void SetField(object row, string fieldName, string value)
     {
-        var setValue = row.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) })
+        var setValue = SetValueNameObjectCache.GetOrAdd(row.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }))
                        ?? throw new InvalidOperationException("Could not find row.SetValue(string, object).");
         setValue.Invoke(row, new object[] { fieldName, value });
     }
@@ -799,13 +860,14 @@ public sealed class SapDllSapClient : ISapClient
     {
         try
         {
-            var getString = row.GetType().GetMethod("GetString", new[] { typeof(string) });
+            var rowType = row.GetType();
+            var getString = GetStringByNameCache.GetOrAdd(rowType, t => t.GetMethod("GetString", new[] { typeof(string) }));
             if (getString is not null)
             {
                 return Convert.ToString(getString.Invoke(row, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
             }
 
-            var getValue = row.GetType().GetMethod("GetValue", new[] { typeof(string) });
+            var getValue = GetValueByNameCache.GetOrAdd(rowType, t => t.GetMethod("GetValue", new[] { typeof(string) }));
             if (getValue is not null)
             {
                 return Convert.ToString(getValue.Invoke(row, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
@@ -824,13 +886,14 @@ public sealed class SapDllSapClient : ISapClient
     {
         try
         {
-            var getStringByIndex = row.GetType().GetMethod("GetString", new[] { typeof(int) });
+            var rowType = row.GetType();
+            var getStringByIndex = GetStringByIndexCache.GetOrAdd(rowType, t => t.GetMethod("GetString", new[] { typeof(int) }));
             if (getStringByIndex is not null)
             {
                 return Convert.ToString(getStringByIndex.Invoke(row, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
             }
 
-            var getValueByIndex = row.GetType().GetMethod("GetValue", new[] { typeof(int) });
+            var getValueByIndex = GetValueByIndexCache.GetOrAdd(rowType, t => t.GetMethod("GetValue", new[] { typeof(int) }));
             if (getValueByIndex is not null)
             {
                 return Convert.ToString(getValueByIndex.Invoke(row, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;

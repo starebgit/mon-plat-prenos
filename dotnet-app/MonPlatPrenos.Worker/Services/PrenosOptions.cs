@@ -15,6 +15,9 @@ public sealed class PrenosOptions
     public List<TermRule> ExtraTerms { get; set; } = new List<TermRule>();
     public bool EnableDebugJson { get; set; } = true;
     public bool EnableDebugTextDump { get; set; } = true;
+    public int ConfirmationConcurrency { get; set; } = 4;
+    public bool EnableTimingLog { get; set; } = true;
+    public int TimingSampleLimit { get; set; } = 20;
     public SapIntegrationOptions Sap { get; set; } = new SapIntegrationOptions();
 }
 
