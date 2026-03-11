@@ -400,11 +400,42 @@ public sealed class PrenosJob
         }
 
         var safeWidth = Math.Max(5, width);
-        var ratio = Math.Clamp((double)current / total, 0d, 1d);
+        var ratio = ClampDouble((double)current / total, 0d, 1d);
         var filled = (int)Math.Round(ratio * safeWidth, MidpointRounding.AwayFromZero);
-        filled = Math.Clamp(filled, 0, safeWidth);
+        filled = ClampInt(filled, 0, safeWidth);
 
         return "[" + new string('#', filled) + new string('-', safeWidth - filled) + "]";
+    }
+
+
+    private static int ClampInt(int value, int min, int max)
+    {
+        if (value < min)
+        {
+            return min;
+        }
+
+        if (value > max)
+        {
+            return max;
+        }
+
+        return value;
+    }
+
+    private static double ClampDouble(double value, double min, double max)
+    {
+        if (value < min)
+        {
+            return min;
+        }
+
+        if (value > max)
+        {
+            return max;
+        }
+
+        return value;
     }
 
     private static void RenderSingleLineStatus(string message)
