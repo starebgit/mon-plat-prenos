@@ -2,28 +2,45 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Reflection;
+using System.Data;
+using System.Data.OleDb;
 using MonPlatPrenos.Worker.Models;
 
 namespace MonPlatPrenos.Worker.Services;
 
+
 public sealed class SapDllSapClient : ISapClient
 {
+    public sealed class LoginPreview
+    {
+        public string DestinationName { get; set; } = string.Empty;
+        public string AppServerHost { get; set; } = string.Empty;
+        public string SystemNumber { get; set; } = string.Empty;
+        public string Client { get; set; } = string.Empty;
+        public string User { get; set; } = string.Empty;
+        public string Language { get; set; } = string.Empty;
+        public string PasswordMasked { get; set; } = string.Empty;
+        public bool IsComplete { get; set; }
+        public string LoginSource { get; set; } = string.Empty;
+        public string LoginMessage { get; set; } = string.Empty;
+    }
     private readonly string _sapDllFullPath;
     private readonly string _saUtilsDllFullPath;
-    private readonly ILogger<SapDllSapClient> _logger;
     private readonly Assembly _sapAssembly;
     private readonly Assembly _sapUtilsAssembly;
+    private readonly SapIntegrationOptions _options;
+    private string _loginSource = "config";
+    private string _loginMessage = "Using direct Prenos:Sap values if provided.";
 
-    public SapDllSapClient(SapIntegrationOptions options, ILogger<SapDllSapClient> logger)
+    public SapDllSapClient(SapIntegrationOptions options)
     {
+        _options = options;
         _sapDllFullPath = ResolveSapPath(options.SapDllPath, "sapnco.dll");
         _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath, "sapnco_utils.dll");
-        _logger = logger;
 
         if (!File.Exists(_sapDllFullPath))
         {
@@ -67,7 +84,86 @@ public sealed class SapDllSapClient : ISapClient
                 ex);
         }
 
-        logger.LogInformation("Loaded SAP libraries: {SapDll} and {SaUtilsDll}. Loaded assemblies: {SapAsm}, {UtilsAsm}", _sapDllFullPath, _saUtilsDllFullPath, _sapAssembly.FullName, _sapUtilsAssembly.FullName);
+
+        TryLoadSapLoginFromDatabase();
+        RegisterDestinationConfigurationIfConfigured();
+    }
+
+
+    private sealed class ReflectionDestinationConfigurationProxy : DispatchProxy
+    {
+        private Assembly _sapAssembly = null!;
+        private SapIntegrationOptions _options = null!;
+        public void Initialize(Assembly sapAssembly, SapIntegrationOptions options)
+        {
+            _sapAssembly = sapAssembly;
+            _options = options;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod is null)
+            {
+                throw new InvalidOperationException("Destination configuration proxy received null targetMethod.");
+            }
+
+            if (string.Equals(targetMethod.Name, "get_ChangeEventsSupported", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (string.Equals(targetMethod.Name, "GetParameters", StringComparison.Ordinal))
+            {
+                var destinationName = Convert.ToString(args?[0], CultureInfo.InvariantCulture);
+                var expectedName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
+                if (!string.Equals(destinationName, expectedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+
+                var configParametersType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcConfigParameters")
+                                           ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcConfigParameters not found.");
+
+                var instance = Activator.CreateInstance(configParametersType)
+                               ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
+
+                SetParam(instance, "Name", expectedName);
+                SetParam(instance, "AppServerHost", _options.AppServerHost);
+                SetParam(instance, "SystemNumber", _options.SystemNumber);
+                SetParam(instance, "Client", _options.Client);
+                SetParam(instance, "User", _options.User);
+                SetParam(instance, "Password", _options.Password);
+                SetParam(instance, "Language", string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language);
+
+                if (!string.IsNullOrWhiteSpace(_options.Router))
+                {
+                    SetParam(instance, "SAPRouter", _options.Router);
+                }
+
+                return instance;
+            }
+
+            if (string.Equals(targetMethod.Name, "add_ConfigurationChanged", StringComparison.Ordinal)
+                || string.Equals(targetMethod.Name, "remove_ConfigurationChanged", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            throw new NotSupportedException($"IDestinationConfiguration method '{targetMethod.Name}' is not supported by proxy.");
+        }
+
+        private static void SetParam(object configParams, string key, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            var setValue = configParams.GetType().GetMethod("set_Item", new[] { typeof(string), typeof(string) })
+                           ?? throw new InvalidOperationException("RfcConfigParameters indexer setter not found.");
+
+            setValue.Invoke(configParams, new object[] { key, value });
+        }
     }
 
 
@@ -140,8 +236,6 @@ public sealed class SapDllSapClient : ISapClient
                 mappedPlant.Trim()));
         }
 
-        _logger.LogInformation("BAPI_PRODORD_GET_LIST returned {Count} ORDER_HEADER rows.", results.Count);
-        _logger.LogInformation("Mapped ORDER_HEADER fields used: ORDER_NUMBER, MATERIAL(_EXTERNAL/_LONG), SYSTEM_STATUS, TARGET_QUANTITY, START_DATE, PROD_SCHED/PROD_SCHEDULER, PRODUCTION_PLANT/PLANT.");
 
         return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
     }
@@ -177,8 +271,6 @@ public sealed class SapDllSapClient : ISapClient
                 stepCode.Trim()));
         }
 
-        _logger.LogInformation("BAPI_PRODORD_GET_DETAIL returned {Count} OPERATION rows for order {OrderNumber}.", results.Count, orderNumber);
-        _logger.LogInformation("Mapped OPERATION fields used: CONF_NO/CONFIRMATION, OPR/ACTIVITY, OPER/VORNR, QUANTITY/CONFIRMABLE_QTY.");
 
         return Task.FromResult<IReadOnlyList<SapOperation>>(results);
     }
@@ -213,8 +305,6 @@ public sealed class SapDllSapClient : ISapClient
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
 
-        _logger.LogInformation("BAPI_PRODORDCONF_GETLIST/GETDETAIL returned {Count} confirmations for order {OrderNumber}, confirmation {Confirmation}.", results.Count, orderNumber, confirmation);
-        _logger.LogInformation("Mapped CONFIRMATIONS/CONF_DETAIL fields used: CONF_NO/CONFIRMATION, CONF_CNT/CONFIRMATION_COUNTER, YIELD.");
 
         return Task.FromResult<IReadOnlyList<SapConfirmation>>(results);
     }
@@ -246,8 +336,6 @@ public sealed class SapDllSapClient : ISapClient
                 description.Trim()));
         }
 
-        _logger.LogInformation("BAPI_PRODORD_GET_DETAIL returned {Count} COMPONENT rows for order {OrderNumber}.", results.Count, orderNumber);
-        _logger.LogInformation("Mapped COMPONENT fields used: MATERIAL/MATERIAL_LONG/MATERIAL_EXTERNAL, MATERIAL_DESCRIPTION/DESCRIPTION.");
 
         return Task.FromResult<IReadOnlyList<SapComponent>>(results);
     }
@@ -370,8 +458,194 @@ public sealed class SapDllSapClient : ISapClient
             .FirstOrDefault(m => m.Name == "GetDestination" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string))
             ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(string) not found.");
 
-        return getDestination.Invoke(null, new object[] { "MONPLAT" })
-               ?? throw new InvalidOperationException("GetDestination returned null for destination MONPLAT.");
+        var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
+
+        return getDestination.Invoke(null, new object[] { destinationName })
+               ?? throw new InvalidOperationException($"GetDestination returned null for destination {destinationName}.");
+    }
+
+    private void TryLoadSapLoginFromDatabase()
+    {
+        if (HasInlineDestinationConfig())
+        {
+            _loginSource = "config";
+            _loginMessage = "Inline SAP values are already present; DB lookup skipped.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.SapLoginConnectionString))
+        {
+            _loginSource = "none";
+            _loginMessage = "SapLoginConnectionString is empty; DB lookup skipped.";
+            Console.WriteLine("SAP-LOGIN: SapLoginConnectionString is empty; DB lookup skipped.");
+            return;
+        }
+
+        try
+        {
+            using (var connection = new OleDbConnection(_options.SapLoginConnectionString))
+            {
+                connection.Open();
+
+                using (var command = connection.CreateCommand())
+                {
+                    if (_options.SapLoginIdent.HasValue)
+                    {
+                        command.CommandText = "select top 1 uporab, sistem, client, streznik, sysnnum, pass, jezik from prijava where ident = ?";
+                        command.Parameters.AddWithValue("@p1", _options.SapLoginIdent.Value);
+                    }
+                    else
+                    {
+                        command.CommandText = "select top 1 uporab, sistem, client, streznik, sysnnum, pass, jezik from prijava where glavni = 'X'";
+                    }
+
+                    using (var reader = command.ExecuteReader(CommandBehavior.SingleRow))
+                    {
+                        if (reader is null || !reader.Read())
+                        {
+                            _loginSource = "db";
+                            _loginMessage = string.Format(CultureInfo.InvariantCulture, "No row found in table prijava for ident={0}.", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni='X'>");
+                            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: No row found in table prijava (ident={0}).", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni=\'X\'>"));
+                            return;
+                        }
+
+                        _options.User = SafeGetString(reader, 0);
+                        _options.SystemNumber = SafeGetIntString(reader, 4);
+                        _options.SystemNumber = string.IsNullOrWhiteSpace(_options.SystemNumber) ? _options.SystemNumber : _options.SystemNumber.PadLeft(2, '0');
+                        _options.Client = SafeGetString(reader, 2);
+                        _options.AppServerHost = SafeGetString(reader, 3);
+                        _options.Password = SafeGetString(reader, 5);
+                        _options.Language = SafeGetString(reader, 6);
+
+                        var systemName = SafeGetString(reader, 1);
+                        if (!string.IsNullOrWhiteSpace(systemName)
+                            && string.Equals(_options.DestinationName, "MONPLAT", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _options.DestinationName = systemName;
+                        }
+                    }
+                }
+            }
+
+            if (HasInlineDestinationConfig())
+            {
+                _loginSource = "db";
+                _loginMessage = "Loaded SAP login values from table prijava.";
+                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Loaded login from DB for destination {0}.", _options.DestinationName));
+            }
+            else
+            {
+                _loginSource = "db";
+                _loginMessage = "DB lookup executed, but required fields are still incomplete.";
+                Console.WriteLine("SAP-LOGIN: DB lookup ran, but required fields are still incomplete.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _loginSource = "db";
+            _loginMessage = string.Format(CultureInfo.InvariantCulture, "DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message);
+            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message));
+        }
+    }
+
+    private static string SafeGetString(IDataRecord record, int ordinal)
+    {
+        return record.IsDBNull(ordinal) ? string.Empty : Convert.ToString(record.GetValue(ordinal), CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+    }
+
+    private static string SafeGetIntString(IDataRecord record, int ordinal)
+    {
+        if (record.IsDBNull(ordinal))
+        {
+            return string.Empty;
+        }
+
+        var value = record.GetValue(ordinal);
+        if (value is short s)
+        {
+            return s.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (value is int i)
+        {
+            return i.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+    }
+
+    public LoginPreview GetLoginPreview()
+    {
+        var password = _options.Password ?? string.Empty;
+        var masked = string.IsNullOrEmpty(password) ? string.Empty : new string('*', Math.Min(password.Length, 8));
+
+        return new LoginPreview
+        {
+            DestinationName = _options.DestinationName ?? string.Empty,
+            AppServerHost = _options.AppServerHost ?? string.Empty,
+            SystemNumber = _options.SystemNumber ?? string.Empty,
+            Client = _options.Client ?? string.Empty,
+            User = _options.User ?? string.Empty,
+            Language = _options.Language ?? string.Empty,
+            PasswordMasked = masked,
+            IsComplete = HasInlineDestinationConfig(),
+            LoginSource = _loginSource,
+            LoginMessage = _loginMessage
+        };
+    }
+
+    private void RegisterDestinationConfigurationIfConfigured()
+    {
+        if (!HasInlineDestinationConfig())
+        {
+            return;
+        }
+
+        var providerType = _sapAssembly.GetType("SAP.Middleware.Connector.IDestinationConfiguration")
+                          ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.IDestinationConfiguration not found in sapnco.dll.");
+
+        var destinationManagerType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcDestinationManager")
+                                     ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcDestinationManager not found in sapnco.dll.");
+
+        var registerMethod = destinationManagerType
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == "RegisterDestinationConfiguration"
+                              && m.GetParameters().Length == 1
+                              && m.GetParameters()[0].ParameterType.FullName == providerType.FullName)
+            ?? throw new InvalidOperationException("RfcDestinationManager.RegisterDestinationConfiguration(...) not found.");
+
+        var createMethod = typeof(DispatchProxy)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == "Create" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 2)
+            ?? throw new InvalidOperationException("DispatchProxy.Create<T, TProxy>() not found.");
+
+        var closedCreate = createMethod.MakeGenericMethod(providerType, typeof(ReflectionDestinationConfigurationProxy));
+        var proxy = closedCreate.Invoke(null, null)
+            ?? throw new InvalidOperationException("Could not create SAP destination configuration proxy.");
+
+        if (proxy is not ReflectionDestinationConfigurationProxy impl)
+        {
+            throw new InvalidOperationException("Created SAP destination proxy has unexpected runtime type.");
+        }
+
+        impl.Initialize(_sapAssembly, _options);
+
+        try
+        {
+            registerMethod.Invoke(null, new object[] { proxy });
+        }
+        catch (TargetInvocationException ex)
+        {
+        }
+    }
+
+    private bool HasInlineDestinationConfig()
+    {
+        return !string.IsNullOrWhiteSpace(_options.AppServerHost)
+               && !string.IsNullOrWhiteSpace(_options.SystemNumber)
+               && !string.IsNullOrWhiteSpace(_options.Client)
+               && !string.IsNullOrWhiteSpace(_options.User)
+               && !string.IsNullOrWhiteSpace(_options.Password);
     }
 
     private static void FillRange(object function, string tableName, string option, string low, string? high = null)
