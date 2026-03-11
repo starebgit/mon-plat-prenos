@@ -703,11 +703,28 @@ public sealed class SapDllSapClient : ISapClient
         }
     }
 
-    private static void InvokeFunction(object function)
+    private void InvokeFunction(object function)
     {
-        var invoke = function.GetType().GetMethod("Invoke")
-                     ?? throw new InvalidOperationException("Could not find function.Invoke().");
-        invoke.Invoke(function, null);
+        var functionType = function.GetType();
+
+        var invokeWithoutParameters = functionType.GetMethod("Invoke", Type.EmptyTypes);
+        if (invokeWithoutParameters is not null)
+        {
+            invokeWithoutParameters.Invoke(function, null);
+            return;
+        }
+
+        var invokeWithDestination = functionType
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(m => m.Name == "Invoke" && m.GetParameters().Length == 1);
+
+        if (invokeWithDestination is null)
+        {
+            throw new InvalidOperationException("Could not find function.Invoke() overload.");
+        }
+
+        var destination = GetDestination();
+        invokeWithDestination.Invoke(function, new[] { destination });
     }
 
     private static void SetField(object row, string fieldName, string value)
