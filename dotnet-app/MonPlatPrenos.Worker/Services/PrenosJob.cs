@@ -56,7 +56,8 @@ public sealed class PrenosJob
         for (var orderIndex = 0; orderIndex < orders.Count; orderIndex++)
         {
             var order = orders[orderIndex];
-            TryRenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | Current: {order.OrderNumber} | Plates: {stats.PlateRecordsWritten} | Unified: {stats.UnifiedRowsWritten}", status);
+            var progressBar = BuildProgressBar(orderIndex + 1, orders.Count, 22);
+            TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Plates:{stats.PlateRecordsWritten} Unified:{stats.UnifiedRowsWritten}", status);
             if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
             {
                 stats.SkippedByDateFilter++;
@@ -389,6 +390,21 @@ public sealed class PrenosJob
         }
 
         RenderSingleLineStatus(message);
+    }
+
+    private static string BuildProgressBar(int current, int total, int width)
+    {
+        if (total <= 0)
+        {
+            return "[" + new string('-', Math.Max(1, width)) + "]";
+        }
+
+        var safeWidth = Math.Max(5, width);
+        var ratio = Math.Clamp((double)current / total, 0d, 1d);
+        var filled = (int)Math.Round(ratio * safeWidth, MidpointRounding.AwayFromZero);
+        filled = Math.Clamp(filled, 0, safeWidth);
+
+        return "[" + new string('#', filled) + new string('-', safeWidth - filled) + "]";
     }
 
     private static void RenderSingleLineStatus(string message)

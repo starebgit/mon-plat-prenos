@@ -220,13 +220,17 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
-            SetImport(detailFunction, "CONFIRMATION", confNo);
-            SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
-            InvokeFunction(detailFunction);
+            var yield = ParseInt(GetFirstString(row, "YIELD", "CONFIRMED_YIELD", "LMNGA", "CONF_QTY"));
+            if (yield == 0)
+            {
+                var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
+                SetImport(detailFunction, "CONFIRMATION", confNo);
+                SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
+                InvokeFunction(detailFunction);
 
-            var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
-            var yield = ParseInt(GetFirstString(confDetail, "YIELD", "CONFIRMED_YIELD", "LMNGA"));
+                var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
+                yield = ParseInt(GetFirstString(confDetail, "YIELD", "CONFIRMED_YIELD", "LMNGA"));
+            }
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
