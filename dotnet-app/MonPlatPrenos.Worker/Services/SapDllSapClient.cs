@@ -90,7 +90,7 @@ public sealed class SapDllSapClient : ISapClient
     }
 
 
-    private sealed class ReflectionDestinationConfigurationProxy : DispatchProxy
+    private class ReflectionDestinationConfigurationProxy : DispatchProxy
     {
         private Assembly _sapAssembly = null!;
         private SapIntegrationOptions _options = null!;
@@ -614,28 +614,28 @@ public sealed class SapDllSapClient : ISapClient
                               && m.GetParameters()[0].ParameterType.FullName == providerType.FullName)
             ?? throw new InvalidOperationException("RfcDestinationManager.RegisterDestinationConfiguration(...) not found.");
 
-        var createMethod = typeof(DispatchProxy)
-            .GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .FirstOrDefault(m => m.Name == "Create" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 2)
-            ?? throw new InvalidOperationException("DispatchProxy.Create<T, TProxy>() not found.");
-
-        var closedCreate = createMethod.MakeGenericMethod(providerType, typeof(ReflectionDestinationConfigurationProxy));
-        var proxy = closedCreate.Invoke(null, null)
-            ?? throw new InvalidOperationException("Could not create SAP destination configuration proxy.");
-
-        if (proxy is not ReflectionDestinationConfigurationProxy impl)
-        {
-            throw new InvalidOperationException("Created SAP destination proxy has unexpected runtime type.");
-        }
-
-        impl.Initialize(_sapAssembly, _options);
-
         try
         {
+            var createMethod = typeof(DispatchProxy)
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "Create" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 2)
+                ?? throw new InvalidOperationException("DispatchProxy.Create<T, TProxy>() not found.");
+
+            var closedCreate = createMethod.MakeGenericMethod(providerType, typeof(ReflectionDestinationConfigurationProxy));
+            var proxy = closedCreate.Invoke(null, null)
+                ?? throw new InvalidOperationException("Could not create SAP destination configuration proxy.");
+
+            if (proxy is not ReflectionDestinationConfigurationProxy impl)
+            {
+                throw new InvalidOperationException("Created SAP destination proxy has unexpected runtime type.");
+            }
+
+            impl.Initialize(_sapAssembly, _options);
             registerMethod.Invoke(null, new object[] { proxy });
         }
-        catch (TargetInvocationException ex)
+        catch (Exception ex)
         {
+            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Destination registration failed: {0}: {1}", ex.GetType().Name, ex.Message));
         }
     }
 
