@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 namespace MonPlatPrenos.Worker.Models;
 
 public sealed record SapOrderHeader(
@@ -29,10 +28,6 @@ public sealed record SapComponent(
     string OrderNumber,
     string Material,
     string Description);
-
-public sealed record SapOrderDetail(
-    IReadOnlyList<SapOperation> Operations,
-    IReadOnlyList<SapComponent> Components);
 
 public sealed record PlateDemandRecord(
     int Track,
