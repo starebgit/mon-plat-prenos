@@ -420,7 +420,13 @@ public sealed class PrenosJob
         Directory.CreateDirectory(_options.OutputDirectory);
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var path = Path.Combine(_options.OutputDirectory, $"prenos-timing-{stamp}.log");
-        await WriteAllTextCompatAsync(path, timing.ToReportText(), cancellationToken);
+        var report = timing.ToReportText();
+        if (_sapClient is SapDllSapClient sapDll)
+        {
+            report += sapDll.BuildDetailedTimingReport();
+        }
+
+        await WriteAllTextCompatAsync(path, report, cancellationToken);
     }
 
     private static async Task<T> TimedAsync<T>(TimingCollector collector, string step, Func<Task<T>> action)

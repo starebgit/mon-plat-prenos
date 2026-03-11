@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Reflection;
+using System.Diagnostics;
+using System.Text;
 using System.Data;
 using System.Data.OleDb;
 using System.Collections.Concurrent;
@@ -39,6 +41,34 @@ public sealed class SapDllSapClient : ISapClient
     private object? _cachedRepository;
     private string _loginSource = "config";
     private string _loginMessage = "Using direct Prenos:Sap values if provided.";
+    private readonly object _timingLock = new object();
+    private readonly Dictionary<string, DetailedTimingItem> _detailedTimings = new Dictionary<string, DetailedTimingItem>(StringComparer.Ordinal);
+
+
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CountPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> RowIndexerCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByNameCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByNameCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByIndexCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByIndexCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> CreateFunctionCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueNameObjectCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueIndexObjectCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
+
+    private sealed class DetailedTimingItem
+    {
+        public long Count;
+        public long TotalMs;
+        public long MaxMs;
+        public readonly List<long> Samples = new List<long>();
+    }
 
     private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
@@ -111,6 +141,54 @@ public sealed class SapDllSapClient : ISapClient
 
 
 
+    private void AddDetailedTiming(string key, long elapsedMs)
+    {
+        lock (_timingLock)
+        {
+            if (!_detailedTimings.TryGetValue(key, out var item))
+            {
+                item = new DetailedTimingItem();
+                _detailedTimings.Add(key, item);
+            }
+
+            item.Count++;
+            item.TotalMs += elapsedMs;
+            if (elapsedMs > item.MaxMs)
+            {
+                item.MaxMs = elapsedMs;
+            }
+
+            if (item.Samples.Count < 20)
+            {
+                item.Samples.Add(elapsedMs);
+            }
+        }
+    }
+
+    public string BuildDetailedTimingReport()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine("SAP client detailed timing");
+
+        List<KeyValuePair<string, DetailedTimingItem>> snapshot;
+        lock (_timingLock)
+        {
+            snapshot = _detailedTimings.ToList();
+        }
+
+        foreach (var kv in snapshot.OrderByDescending(e => e.Value.TotalMs))
+        {
+            var avg = kv.Value.Count == 0 ? 0d : (double)kv.Value.TotalMs / kv.Value.Count;
+            sb.AppendLine($"{kv.Key}");
+            sb.AppendLine($"  calls={kv.Value.Count}, totalMs={kv.Value.TotalMs}, avgMs={avg:F2}, maxMs={kv.Value.MaxMs}");
+            sb.AppendLine($"  firstSamplesMs=[{string.Join(", ", kv.Value.Samples)}]");
+        }
+
+        return sb.ToString();
+    }
+
+
 
     private static string ResolveSapPath(string configuredPath, string defaultFileName)
     {
@@ -150,8 +228,11 @@ public sealed class SapDllSapClient : ISapClient
         FillRange(function, "ORDER_NUMBER_RANGE", "GE", orderFrom);
         FillRange(function, "MATERIAL_RANGE", "BT", materialFrom, materialTo);
 
+        var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
+        AddDetailedTiming("GetProductionOrdersForPlates.Invoke", invokeSw.ElapsedMilliseconds);
 
+        var parseSw = Stopwatch.StartNew();
         var orderHeader = GetTable(function, "ORDER_HEADER");
         var results = new List<SapOrderHeader>();
 
@@ -182,6 +263,7 @@ public sealed class SapDllSapClient : ISapClient
         }
 
 
+        AddDetailedTiming("GetProductionOrdersForPlates.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
     }
 
@@ -191,8 +273,11 @@ public sealed class SapDllSapClient : ISapClient
         SetImport(function, "NUMBER", orderNumber);
         SetOrderObjectsFlag(function, 4, "OPERATION", "OPERATIONS");
 
+        var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
+        AddDetailedTiming("GetOperations.Invoke", invokeSw.ElapsedMilliseconds);
 
+        var parseSw = Stopwatch.StartNew();
         var operationTable = GetTable(function, "OPERATION");
         var results = new List<SapOperation>();
 
@@ -219,6 +304,7 @@ public sealed class SapDllSapClient : ISapClient
         }
 
 
+        AddDetailedTiming("GetOperations.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult<IReadOnlyList<SapOperation>>(results);
     }
 
@@ -227,8 +313,11 @@ public sealed class SapDllSapClient : ISapClient
         var listFunction = CreateFunction("BAPI_PRODORDCONF_GETLIST");
         FillRange(listFunction, "ORDER_RANGE", "EQ", orderNumber);
         FillRange(listFunction, "CONF_RANGE", "EQ", confirmation);
+        var listInvokeSw = Stopwatch.StartNew();
         InvokeFunction(listFunction);
+        AddDetailedTiming("GetConfirmations.ListInvoke", listInvokeSw.ElapsedMilliseconds);
 
+        var parseSw = Stopwatch.StartNew();
         var confirmationsTable = GetTable(listFunction, "CONFIRMATIONS");
         var results = new List<SapConfirmation>();
 
@@ -247,7 +336,9 @@ public sealed class SapDllSapClient : ISapClient
                 var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
                 SetImport(detailFunction, "CONFIRMATION", confNo);
                 SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
+                var detailInvokeSw = Stopwatch.StartNew();
                 InvokeFunction(detailFunction);
+                AddDetailedTiming("GetConfirmations.DetailInvoke", detailInvokeSw.ElapsedMilliseconds);
 
                 var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
                 yield = ParseInt(GetFirstString(confDetail, "YIELD", "CONFIRMED_YIELD", "LMNGA"));
@@ -257,6 +348,7 @@ public sealed class SapDllSapClient : ISapClient
         }
 
 
+        AddDetailedTiming("GetConfirmations.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult<IReadOnlyList<SapConfirmation>>(results);
     }
 
@@ -266,8 +358,11 @@ public sealed class SapDllSapClient : ISapClient
         SetImport(function, "NUMBER", orderNumber);
         SetOrderObjectsFlag(function, 3, "COMPONENT", "COMPONENTS");
 
+        var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
+        AddDetailedTiming("GetComponents.Invoke", invokeSw.ElapsedMilliseconds);
 
+        var parseSw = Stopwatch.StartNew();
         var componentTable = GetTable(function, "COMPONENT");
         var results = new List<SapComponent>();
 
@@ -288,6 +383,7 @@ public sealed class SapDllSapClient : ISapClient
         }
 
 
+        AddDetailedTiming("GetComponents.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult<IReadOnlyList<SapComponent>>(results);
     }
 
@@ -302,8 +398,11 @@ public sealed class SapDllSapClient : ISapClient
             FillRange(function, "ORDER_NUMBER_RANGE", "GE", orderFrom);
         }
 
+        var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
+        AddDetailedTiming("GetProductionOrdersByMaterial.Invoke", invokeSw.ElapsedMilliseconds);
 
+        var parseSw = Stopwatch.StartNew();
         var orderHeader = GetTable(function, "ORDER_HEADER");
         var results = new List<SapOrderHeader>();
 
@@ -326,6 +425,7 @@ public sealed class SapDllSapClient : ISapClient
                 GetFirstString(row, "PRODUCTION_PLANT", "PLANT", "WERKS").Trim()));
         }
 
+        AddDetailedTiming("GetProductionOrdersByMaterial.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
     }
 
@@ -334,8 +434,11 @@ public sealed class SapDllSapClient : ISapClient
         var function = CreateFunction("ZETA_RFC_READ_AFRU");
         SetImport(function, "dday", fromDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
         SetImport(function, "stnal", orderNumber);
+        var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
+        AddDetailedTiming("GetAfruYieldDelta.Invoke", invokeSw.ElapsedMilliseconds);
 
+        var parseSw = Stopwatch.StartNew();
         var table = GetTable(function, "IT_AFRU");
         var yi1 = 0;
         var yi2 = 0;
@@ -383,6 +486,7 @@ public sealed class SapDllSapClient : ISapClient
             }
         }
 
+        AddDetailedTiming("GetAfruYieldDelta.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult(yi1 - yi2);
     }
 
