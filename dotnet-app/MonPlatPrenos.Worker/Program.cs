@@ -72,6 +72,12 @@ public static class Program
                     Console.WriteLine("RUN-ONCE LOGIN CHECK");
                     Console.WriteLine("ISapClient is MockSapClient. Set Prenos:Sap:UseMock=false to test DB login lookup.");
                 }
+
+                var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
+                var runDate = TryGetDateArg(args, "--from-date") ?? DateTime.Today;
+                Console.WriteLine($"RUN-ONCE PRENOS DAY : {runDate:yyyy-MM-dd}");
+                await job.RunAsync(runDate, CancellationToken.None).ConfigureAwait(false);
+                Console.WriteLine("RUN-ONCE PRENOS DONE");
             }
 
             return 0;
@@ -79,5 +85,30 @@ public static class Program
 
         await host.RunAsync().ConfigureAwait(false);
         return 0;
+    }
+
+    private static DateTime? TryGetDateArg(string[] args, string key)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (!string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (i + 1 >= args.Length)
+            {
+                return null;
+            }
+
+            if (DateTime.TryParse(args[i + 1], out var parsed))
+            {
+                return parsed.Date;
+            }
+
+            return null;
+        }
+
+        return null;
     }
 }

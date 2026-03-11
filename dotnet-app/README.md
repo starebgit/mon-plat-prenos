@@ -22,19 +22,24 @@ Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths fro
 
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
-# one-time run for login check only (prints SAP login config/DB result and exits):
+# one-time run: prints SAP login check and executes prenos for one day (today by default):
 dotnet run -- --run-once
 # if you already built once and want to avoid build/roslyn noise:
 dotnet run --no-build -- --run-once
+# run-once for a specific day:
+dotnet run -- --run-once --from-date 2026-03-11
 
 
 # scheduler mode (runs every day at DailyRunTime):
 dotnet run
 ```
 
-`--from-date`/`--to-date` are currently ignored when using `--run-once`.
+When using `--run-once`, `--from-date` is optional and sets the one-day run date (`DateTime.Today` when omitted). `--to-date` is ignored.
 
-`--run-once` is intentionally simplified now: it only loads SAP login info (from direct `Prenos:Sap` settings or DB lookup), prints it (`RUN-ONCE LOGIN CHECK`), and exits.
+`--run-once` does two steps:
+
+1. login/config check (loads SAP settings from direct `Prenos:Sap` values or DB lookup and prints `RUN-ONCE LOGIN CHECK`)
+2. executes a real one-day prenos (`RUN-ONCE PRENOS DAY`) and exits.
 
 It prints `LoginSource` and `LoginMessage` so you can see why values are empty (for example missing connection string, DB query returned no rows, or DB exception).
 
