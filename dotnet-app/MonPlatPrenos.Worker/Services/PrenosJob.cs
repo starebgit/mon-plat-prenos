@@ -88,17 +88,50 @@ public sealed class PrenosJob
             stats.ValidOperations += validOperations.Count;
 
             var totalYield = 0;
-            for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
+            var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
+            if (maxConcurrency == 1 || validOperations.Count <= 1)
             {
-                var op = validOperations[operationIndex];
-                if (operationIndex == 0 || operationIndex % 5 == 0)
+                for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
                 {
-                    TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
-                }
+                    var op = validOperations[operationIndex];
+                    if (operationIndex == 0 || operationIndex % 5 == 0)
+                    {
+                        TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
+                    }
 
-                var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
-                stats.ConfirmationRowsRead += confirmations.Count;
-                totalYield += confirmations.Sum(c => c.Yield);
+                    var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
+                    stats.ConfirmationRowsRead += confirmations.Count;
+                    totalYield += confirmations.Sum(c => c.Yield);
+                }
+            }
+            else
+            {
+                using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+                var confirmationTasks = validOperations.Select(async (op, operationIndex) =>
+                {
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        if (operationIndex == 0 || operationIndex % 5 == 0)
+                        {
+                            TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
+                        }
+
+                        var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken).ConfigureAwait(false);
+                        return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                var confirmationResults = await Task.WhenAll(confirmationTasks).ConfigureAwait(false);
+                foreach (var result in confirmationResults)
+                {
+                    stats.ConfirmationRowsRead += result.Count;
+                    totalYield += result.Yield;
+                }
             }
 
             var missingQty = order.PlannedQuantity - totalYield;
