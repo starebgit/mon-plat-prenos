@@ -57,7 +57,7 @@ public sealed class PrenosJob
         {
             var order = orders[orderIndex];
             var progressBar = BuildProgressBar(orderIndex + 1, orders.Count, 22);
-            TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Plates:{stats.PlateRecordsWritten} Unified:{stats.UnifiedRowsWritten}", status);
+            RenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Plates:{stats.PlateRecordsWritten} Unified:{stats.UnifiedRowsWritten}");
             if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
             {
                 stats.SkippedByDateFilter++;
@@ -91,6 +91,11 @@ public sealed class PrenosJob
             for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
             {
                 var op = validOperations[operationIndex];
+                if (operationIndex == 0 || operationIndex % 5 == 0)
+                {
+                    TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
+                }
+
                 var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
                 stats.ConfirmationRowsRead += confirmations.Count;
                 totalYield += confirmations.Sum(c => c.Yield);
@@ -448,6 +453,7 @@ public sealed class PrenosJob
         var width = Math.Max(20, Console.WindowWidth - 1);
         var text = message.Length > width ? message.Substring(0, width) : message;
         Console.Write("\r" + text.PadRight(width));
+        Console.Out.Flush();
     }
 
     private static void ClearSingleLineStatus()
@@ -459,6 +465,7 @@ public sealed class PrenosJob
 
         var width = Math.Max(20, Console.WindowWidth - 1);
         Console.Write("\r" + new string(' ', width) + "\r");
+        Console.Out.Flush();
     }
 
     private static Task WriteAllTextCompatAsync(string path, string content, CancellationToken cancellationToken)
