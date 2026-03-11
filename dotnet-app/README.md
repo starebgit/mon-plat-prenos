@@ -22,20 +22,19 @@ Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths fro
 
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
-# one-time run for testing:
+# one-time run for login check only (prints SAP login config/DB result and exits):
 dotnet run -- --run-once
 
-# replay one specific day (uses order StartDate filter):
-dotnet run -- --run-once --from-date 2026-03-09
-
-# replay date range day-by-day (inclusive):
-dotnet run -- --run-once --from-date 2026-03-01 --to-date 2026-03-09
 
 # scheduler mode (runs every day at DailyRunTime):
 dotnet run
 ```
 
-`--from-date`/`--to-date` are test/replay helpers. In replay mode, one job run is executed per day and logs per-step counters (orders fetched, filtered, operations, confirmations, component matches, and outputs).
+`--from-date`/`--to-date` are currently ignored when using `--run-once`.
+
+`--run-once` is intentionally simplified now: it only loads SAP login info (from direct `Prenos:Sap` settings or DB lookup), prints it (`RUN-ONCE LOGIN CHECK`), and exits.
+
+It prints `LoginSource` and `LoginMessage` so you can see why values are empty (for example missing connection string, DB query returned no rows, or DB exception).
 
 ## Configure new terms
 
@@ -146,6 +145,47 @@ Practical checks on the machine where the worker runs:
 Get-Item .\lib\sapnco.dll, .\lib\sapnco_utils.dll |
   Select-Object Name, Length, @{n="ProductVersion";e={$_.VersionInfo.ProductVersion}}, @{n="FileVersion";e={$_.VersionInfo.FileVersion}}
 ```
+
+
+### If `--run-once` fails with `no destination configuration registered`
+
+If logs show:
+
+- `RfcInvalidStateException: Cannot get destination MONPLAT -- no destination configuration registered`
+
+then SAP NCo can load, but destination parameters were not registered.
+
+You can now define destination settings directly in `appsettings.json` under `Prenos:Sap`:
+
+```json
+"Sap": {
+  "UseMock": false,
+  "DestinationName": "MONPLAT",
+  "AppServerHost": "your-sap-host",
+  "SystemNumber": "00",
+  "Client": "100",
+  "User": "YOUR_USER",
+  "Password": "YOUR_PASSWORD",
+  "Language": "EN",
+  "Router": ""
+}
+```
+
+When these fields are present, the worker registers an inline destination provider automatically before first RFC call.
+
+If these SAP fields are empty, the worker can load Delphi-style login from SQL table `prijava` using a configured connection string:
+
+```json
+"Sap": {
+  "SapLoginConnectionString": "Provider=SQLOLEDB.1;Password=akplat;Persist Security Info=True;User ID=akplat;Initial Catalog=SAPkontrola;Data Source=172.20.1.14",
+  "SapLoginIdent": null
+}
+```
+
+- `SapLoginConnectionString`: direct DB connection string for table `prijava`.
+- `SapLoginIdent`: optional specific `prijava.ident`; when null, uses default row `glavni = 'X'`.
+
+Mapped columns: `uporab -> User`, `client -> Client`, `streznik -> AppServerHost`, `sysnnum -> SystemNumber`, `pass -> Password`, `jezik -> Language`.
 
 ### Important: what is ready vs not ready
 
@@ -278,3 +318,6 @@ The Delphi app writes transfer data into Access/ADO tables defined through `Mont
 - `Zadprenos` (run timestamp marker).
 
 Useful daily checks in the legacy DB are based on `plosce.danstart` (orders per day) and the latest record in `Zadprenos` (last transfer execution).
+
+
+If you still see very verbose host lines (Roslyn/corehost), that output usually comes from environment variables like `COREHOST_TRACE` set in your shell, not from app logging.
