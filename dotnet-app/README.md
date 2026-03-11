@@ -22,20 +22,17 @@ Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths fro
 
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
-# one-time run for testing:
+# one-time run for login check only (prints SAP login config/DB result and exits):
 dotnet run -- --run-once
 
-# replay one specific day (uses order StartDate filter):
-dotnet run -- --run-once --from-date 2026-03-09
-
-# replay date range day-by-day (inclusive):
-dotnet run -- --run-once --from-date 2026-03-01 --to-date 2026-03-09
 
 # scheduler mode (runs every day at DailyRunTime):
 dotnet run
 ```
 
-`--from-date`/`--to-date` are test/replay helpers. In replay mode, one job run is executed per day and logs per-step counters (orders fetched, filtered, operations, confirmations, component matches, and outputs).
+`--from-date`/`--to-date` are currently ignored when using `--run-once`.
+
+`--run-once` is intentionally simplified now: it only loads SAP login info (from direct `Prenos:Sap` settings or DB lookup), prints it (`RUN-ONCE LOGIN CHECK`), and exits.
 
 ## Configure new terms
 

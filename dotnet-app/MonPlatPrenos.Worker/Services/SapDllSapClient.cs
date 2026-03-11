@@ -13,8 +13,20 @@ using MonPlatPrenos.Worker.Models;
 
 namespace MonPlatPrenos.Worker.Services;
 
+
 public sealed class SapDllSapClient : ISapClient
 {
+    public sealed class LoginPreview
+    {
+        public string DestinationName { get; set; } = string.Empty;
+        public string AppServerHost { get; set; } = string.Empty;
+        public string SystemNumber { get; set; } = string.Empty;
+        public string Client { get; set; } = string.Empty;
+        public string User { get; set; } = string.Empty;
+        public string Language { get; set; } = string.Empty;
+        public string PasswordMasked { get; set; } = string.Empty;
+        public bool IsComplete { get; set; }
+    }
     private readonly string _sapDllFullPath;
     private readonly string _saUtilsDllFullPath;
     private readonly ILogger<SapDllSapClient> _logger;
@@ -560,6 +572,24 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         return Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+    }
+
+    public LoginPreview GetLoginPreview()
+    {
+        var password = _options.Password ?? string.Empty;
+        var masked = string.IsNullOrEmpty(password) ? string.Empty : new string('*', Math.Min(password.Length, 8));
+
+        return new LoginPreview
+        {
+            DestinationName = _options.DestinationName ?? string.Empty,
+            AppServerHost = _options.AppServerHost ?? string.Empty,
+            SystemNumber = _options.SystemNumber ?? string.Empty,
+            Client = _options.Client ?? string.Empty,
+            User = _options.User ?? string.Empty,
+            Language = _options.Language ?? string.Empty,
+            PasswordMasked = masked,
+            IsComplete = HasInlineDestinationConfig()
+        };
     }
 
     private void RegisterDestinationConfigurationIfConfigured()
