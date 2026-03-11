@@ -154,20 +154,20 @@ Get-Item .\lib\sapnco.dll, .\lib\sapnco_utils.dll |
 ```
 
 
-### If `--run-once` fails with `no destination configuration registered`
+### SAP destination behavior (Delphi-aligned)
 
 If logs show:
 
-- `RfcInvalidStateException: Cannot get destination MONPLAT -- no destination configuration registered`
+- `RfcInvalidStateException: Cannot get destination <name> -- no destination configuration registered`
 
 then SAP NCo can load, but destination parameters were not registered.
 
-You can now define destination settings directly in `appsettings.json` under `Prenos:Sap`:
+The worker now uses Delphi-style direct connection fields from `Prenos:Sap` (or DB `prijava` fallback):
 
 ```json
 "Sap": {
   "UseMock": false,
-  "DestinationName": "MONPLAT",
+  "DestinationName": "",
   "AppServerHost": "your-sap-host",
   "SystemNumber": "00",
   "Client": "100",
@@ -178,7 +178,7 @@ You can now define destination settings directly in `appsettings.json` under `Pr
 }
 ```
 
-When these fields are present, the worker registers an inline destination provider automatically before first RFC call.
+When these fields are present, the worker calls `RfcDestinationManager.GetDestination(RfcConfigParameters)` directly (no global named-destination registration).
 
 If these SAP fields are empty, the worker can load Delphi-style login from SQL table `prijava` using a configured connection string:
 

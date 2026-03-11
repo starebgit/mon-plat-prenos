@@ -374,52 +374,62 @@ public sealed class SapDllSapClient : ISapClient
 
     private object GetDestination()
     {
+        if (!HasInlineDestinationConfig())
+        {
+            throw new InvalidOperationException("SAP destination parameters are incomplete. Expected AppServerHost/SystemNumber/Client/User/Password from config or DB (prijava).");
+        }
+
         var destinationManagerType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcDestinationManager")
                                      ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcDestinationManager not found in sapnco.dll.");
 
-        var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
+        var configType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcConfigParameters")
+                         ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcConfigParameters not found in sapnco.dll.");
 
-        if (HasInlineDestinationConfig())
+        var getByConfig = destinationManagerType
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == "GetDestination"
+                                 && m.GetParameters().Length == 1
+                                 && m.GetParameters()[0].ParameterType.FullName == configType.FullName)
+            ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(RfcConfigParameters) not found.");
+
+        var config = Activator.CreateInstance(configType)
+                     ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
+
+        var language = string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language;
+        var destinationName = ResolveRuntimeDestinationName();
+
+        // Delphi sets concrete connection fields directly; this mirrors that model.
+        // NAME is only a local NCo destination identifier required by GetDestination(RfcConfigParameters).
+        SetParam(config, "NAME", destinationName);
+        SetParam(config, "ASHOST", _options.AppServerHost);
+        SetParam(config, "SYSNR", _options.SystemNumber);
+        SetParam(config, "CLIENT", _options.Client);
+        SetParam(config, "USER", _options.User);
+        SetParam(config, "PASSWD", _options.Password);
+        SetParam(config, "LANG", language);
+        if (!string.IsNullOrWhiteSpace(_options.Router))
         {
-            var configType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcConfigParameters")
-                             ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcConfigParameters not found in sapnco.dll.");
-
-            var getByConfig = destinationManagerType
-                .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "GetDestination"
-                                     && m.GetParameters().Length == 1
-                                     && m.GetParameters()[0].ParameterType.FullName == configType.FullName)
-                ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(RfcConfigParameters) not found.");
-
-            var config = Activator.CreateInstance(configType)
-                         ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
-
-            var language = string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language;
-
-            // NCo expects technical RfcConfigParameters keys (NAME/ASHOST/SYSNR/CLIENT/USER/PASSWD/LANG/SAPROUTER).
-            SetParam(config, "NAME", destinationName);
-            SetParam(config, "ASHOST", _options.AppServerHost);
-            SetParam(config, "SYSNR", _options.SystemNumber);
-            SetParam(config, "CLIENT", _options.Client);
-            SetParam(config, "USER", _options.User);
-            SetParam(config, "PASSWD", _options.Password);
-            SetParam(config, "LANG", language);
-            if (!string.IsNullOrWhiteSpace(_options.Router))
-            {
-                SetParam(config, "SAPROUTER", _options.Router);
-            }
-
-            return getByConfig.Invoke(null, new[] { config })
-                   ?? throw new InvalidOperationException("GetDestination(RfcConfigParameters) returned null.");
+            SetParam(config, "SAPROUTER", _options.Router);
         }
 
-        var getByName = destinationManagerType
-            .GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .FirstOrDefault(m => m.Name == "GetDestination" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string))
-            ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(string) not found.");
+        return getByConfig.Invoke(null, new[] { config })
+               ?? throw new InvalidOperationException("GetDestination(RfcConfigParameters) returned null.");
+    }
 
-        return getByName.Invoke(null, new object[] { destinationName })
-               ?? throw new InvalidOperationException($"GetDestination returned null for destination {destinationName}.");
+    private string ResolveRuntimeDestinationName()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.DestinationName))
+        {
+            return _options.DestinationName!;
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "{0}_{1}_{2}_{3}",
+            _options.User ?? string.Empty,
+            _options.AppServerHost ?? string.Empty,
+            _options.SystemNumber ?? string.Empty,
+            _options.Client ?? string.Empty);
     }
 
     private void TryLoadSapLoginFromDatabase()
@@ -475,12 +485,7 @@ public sealed class SapDllSapClient : ISapClient
                         _options.Password = SafeGetString(reader, 5);
                         _options.Language = SafeGetString(reader, 6);
 
-                        var systemName = SafeGetString(reader, 1);
-                        if (!string.IsNullOrWhiteSpace(systemName)
-                            && string.Equals(_options.DestinationName, "MONPLAT", StringComparison.OrdinalIgnoreCase))
-                        {
-                            _options.DestinationName = systemName;
-                        }
+                        _options.DestinationName = SafeGetString(reader, 1);
                     }
                 }
             }
@@ -489,7 +494,7 @@ public sealed class SapDllSapClient : ISapClient
             {
                 _loginSource = "db";
                 _loginMessage = "Loaded SAP login values from table prijava.";
-                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Loaded login from DB for destination {0}.", _options.DestinationName));
+                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Loaded login from DB (sistem={0}).", _options.DestinationName));
             }
             else
             {
