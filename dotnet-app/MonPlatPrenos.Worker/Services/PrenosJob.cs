@@ -92,8 +92,12 @@ public sealed class PrenosJob
                 continue;
             }
 
-            var track = ParseTrack(order.WorkCenterTrackCode);
-            plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, order.Material, missingQty, order.StartDate));
+            var operationTrackCode = validOperations
+                .Select(o => o.WorkCenterCode)
+                .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
+            var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
+            var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
+            plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
             stats.PlateRecordsWritten++;
 
             var components = await _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken);
@@ -111,8 +115,8 @@ public sealed class PrenosJob
 
                     unified.Add(new UnifiedItem(
                         order.OrderNumber,
-                        order.Material,
-                        component.Material,
+                        formattedPlateMaterial,
+                        FormatMaterialLikeDelphi(component.Material),
                         component.Description,
                         rule.Name,
                         missingQty,
@@ -202,8 +206,8 @@ public sealed class PrenosJob
 
             unified.Add(new UnifiedItem(
                 plateOrder.OrderNumber,
-                plateOrder.Material,
-                semiComponent.Material,
+                FormatMaterialLikeDelphi(plateOrder.Material),
+                FormatMaterialLikeDelphi(semiComponent.Material),
                 $"AFRU delta for {subOrder.OrderNumber}",
                 $"{category}_AFRU",
                 afruDelta,
@@ -239,9 +243,9 @@ public sealed class PrenosJob
             {
                 semiFinished.Add(new SemiFinishedTrace(
                     plateOrder.OrderNumber,
-                    plateOrder.Material,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
                     "Spirala",
-                    cmp.Material,
+                    FormatMaterialLikeDelphi(cmp.Material),
                     samotOrder.OrderNumber,
                     0,
                     DateTime.UtcNow));
@@ -249,8 +253,8 @@ public sealed class PrenosJob
 
                 unified.Add(new UnifiedItem(
                     plateOrder.OrderNumber,
-                    plateOrder.Material,
-                    cmp.Material,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
+                    FormatMaterialLikeDelphi(cmp.Material),
                     cmp.Description,
                     "Spirala",
                     0,
@@ -347,6 +351,30 @@ public sealed class PrenosJob
             cancellationToken.ThrowIfCancellationRequested();
             File.WriteAllText(path, content);
         }, cancellationToken);
+    }
+
+
+    private static string FormatMaterialLikeDelphi(string material)
+    {
+        if (string.IsNullOrWhiteSpace(material))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = material.Trim();
+        if (trimmed.Length < 18 || trimmed.Any(c => !char.IsDigit(c)))
+        {
+            return trimmed;
+        }
+
+        return string.Concat(
+            trimmed.Substring(4, 2),
+            ".",
+            trimmed.Substring(6, 5),
+            ".",
+            trimmed.Substring(11, 3),
+            "/",
+            trimmed.Substring(16, 2));
     }
 
     private static int ParseTrack(string trackCode)
