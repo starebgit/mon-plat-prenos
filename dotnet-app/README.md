@@ -22,20 +22,26 @@ Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths fro
 
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
-# one-time run for testing:
+# one-time run: prints SAP login check and executes prenos for one day (today by default):
 dotnet run -- --run-once
+# if you already built once and want to avoid build/roslyn noise:
+dotnet run --no-build -- --run-once
+# run-once for a specific day:
+dotnet run -- --run-once --from-date 2026-03-11
 
-# replay one specific day (uses order StartDate filter):
-dotnet run -- --run-once --from-date 2026-03-09
-
-# replay date range day-by-day (inclusive):
-dotnet run -- --run-once --from-date 2026-03-01 --to-date 2026-03-09
 
 # scheduler mode (runs every day at DailyRunTime):
 dotnet run
 ```
 
-`--from-date`/`--to-date` are test/replay helpers. In replay mode, one job run is executed per day and logs per-step counters (orders fetched, filtered, operations, confirmations, component matches, and outputs).
+When using `--run-once`, `--from-date` is optional and sets the one-day run date (`DateTime.Today` when omitted). `--to-date` is ignored.
+
+`--run-once` does two steps:
+
+1. login/config check (loads SAP settings from direct `Prenos:Sap` values or DB lookup and prints `RUN-ONCE LOGIN CHECK`)
+2. executes a real one-day prenos (`RUN-ONCE PRENOS DAY`) and exits.
+
+It prints `LoginSource` and `LoginMessage` so you can see why values are empty (for example missing connection string, DB query returned no rows, or DB exception).
 
 ## Configure new terms
 
@@ -146,6 +152,47 @@ Practical checks on the machine where the worker runs:
 Get-Item .\lib\sapnco.dll, .\lib\sapnco_utils.dll |
   Select-Object Name, Length, @{n="ProductVersion";e={$_.VersionInfo.ProductVersion}}, @{n="FileVersion";e={$_.VersionInfo.FileVersion}}
 ```
+
+
+### SAP destination behavior (Delphi-aligned)
+
+If logs show:
+
+- `RfcInvalidStateException: Cannot get destination <name> -- no destination configuration registered`
+
+then SAP NCo can load, but destination parameters were not registered.
+
+The worker now uses Delphi-style direct connection fields from `Prenos:Sap` (or DB `prijava` fallback):
+
+```json
+"Sap": {
+  "UseMock": false,
+  "DestinationName": "",
+  "AppServerHost": "your-sap-host",
+  "SystemNumber": "00",
+  "Client": "100",
+  "User": "YOUR_USER",
+  "Password": "YOUR_PASSWORD",
+  "Language": "EN",
+  "Router": ""
+}
+```
+
+When these fields are present, the worker calls `RfcDestinationManager.GetDestination(RfcConfigParameters)` directly (no global named-destination registration).
+
+If these SAP fields are empty, the worker can load Delphi-style login from SQL table `prijava` using a configured connection string:
+
+```json
+"Sap": {
+  "SapLoginConnectionString": "Provider=SQLOLEDB.1;Password=akplat;Persist Security Info=True;User ID=akplat;Initial Catalog=SAPkontrola;Data Source=172.20.1.14",
+  "SapLoginIdent": null
+}
+```
+
+- `SapLoginConnectionString`: direct DB connection string for table `prijava`.
+- `SapLoginIdent`: optional specific `prijava.ident`; when null, uses default row `glavni = 'X'`.
+
+Mapped columns: `uporab -> User`, `client -> Client`, `streznik -> AppServerHost`, `sysnnum -> SystemNumber`, `pass -> Password`, `jezik -> Language`.
 
 ### Important: what is ready vs not ready
 
@@ -278,3 +325,6 @@ The Delphi app writes transfer data into Access/ADO tables defined through `Mont
 - `Zadprenos` (run timestamp marker).
 
 Useful daily checks in the legacy DB are based on `plosce.danstart` (orders per day) and the latest record in `Zadprenos` (last transfer execution).
+
+
+If you still see very verbose host lines (Roslyn/corehost), that output usually comes from environment variables like `COREHOST_TRACE` set in your shell, not from app logging.
