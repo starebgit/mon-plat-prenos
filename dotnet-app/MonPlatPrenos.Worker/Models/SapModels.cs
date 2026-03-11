@@ -16,7 +16,8 @@ public sealed record SapOperation(
     string Confirmation,
     string OperationCode,
     int ConfirmableQty,
-    string StepCode);
+    string StepCode,
+    string WorkCenterCode);
 
 public sealed record SapConfirmation(
     string Confirmation,
