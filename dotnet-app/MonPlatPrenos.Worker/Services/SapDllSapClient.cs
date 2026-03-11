@@ -181,6 +181,7 @@ public sealed class SapDllSapClient : ISapClient
             var operationCode = GetFirstString(row, "OPR", "ACTIVITY", "LTXA1");
             var stepCode = GetFirstString(row, "OPER", "VORNR", "SUB_ACTIVITY");
             var confirmableQty = ParseInt(GetFirstString(row, "QUANTITY", "CONFIRMABLE_QTY", "BMSCH"));
+            var workCenterCode = GetFirstString(row, "WORK_CNTR", "WORKCENTER", "WORK_CENTER", "ARBPL", "STEUS");
 
             if (string.IsNullOrWhiteSpace(operationCode))
             {
@@ -192,7 +193,8 @@ public sealed class SapDllSapClient : ISapClient
                 confirmation.Trim(),
                 operationCode.Trim(),
                 confirmableQty,
-                stepCode.Trim()));
+                stepCode.Trim(),
+                workCenterCode.Trim()));
         }
 
 
