@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using MonPlatPrenos.Worker.Models;
 using Microsoft.Extensions.Options;
 
@@ -31,7 +32,11 @@ public sealed class PrenosJob
         var orderFrom = "000005223286";
 
         var stats = new ProcessingStats();
+        var status = new ProgressStatus();
+        var operationCodes = new HashSet<string>(_options.OperationCodes, StringComparer.OrdinalIgnoreCase);
+        var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
 
+        RenderSingleLineStatus("Fetching production orders from SAP...");
         var orders = await _sapClient.GetProductionOrdersForPlatesAsync(
             plant,
             _options.SchedulerCode,
@@ -41,13 +46,17 @@ public sealed class PrenosJob
             cancellationToken);
 
         stats.TotalOrdersFetched = orders.Count;
+        RenderSingleLineStatus($"Fetched {orders.Count} production orders. Processing...");
+        status.ForceNext();
 
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
         var semiFinished = new List<SemiFinishedTrace>();
 
-        foreach (var order in orders)
+        for (var orderIndex = 0; orderIndex < orders.Count; orderIndex++)
         {
+            var order = orders[orderIndex];
+            TryRenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | Current: {order.OrderNumber} | Plates: {stats.PlateRecordsWritten} | Unified: {stats.UnifiedRowsWritten}", status);
             if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
             {
                 stats.SkippedByDateFilter++;
@@ -69,7 +78,7 @@ public sealed class PrenosJob
             stats.OrdersAfterCoreFilters++;
             var operations = await _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken);
             var validOperations = operations
-                .Where(o => _options.OperationCodes.Any(code => string.Equals(code, o.OperationCode, StringComparison.OrdinalIgnoreCase)))
+                .Where(o => operationCodes.Contains(o.OperationCode))
                 .Where(o => o.ConfirmableQty > 0)
                 .Where(o => o.StepCode == "0010")
                 .ToList();
@@ -78,8 +87,9 @@ public sealed class PrenosJob
             stats.ValidOperations += validOperations.Count;
 
             var totalYield = 0;
-            foreach (var op in validOperations)
+            for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
             {
+                var op = validOperations[operationIndex];
                 var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
                 stats.ConfirmationRowsRead += confirmations.Count;
                 totalYield += confirmations.Sum(c => c.Yield);
@@ -92,12 +102,15 @@ public sealed class PrenosJob
                 continue;
             }
 
-            var track = ParseTrack(order.WorkCenterTrackCode);
-            plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, order.Material, missingQty, order.StartDate));
+            var operationTrackCode = validOperations
+                .Select(o => o.WorkCenterCode)
+                .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
+            var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
+            var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
+            plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
             stats.PlateRecordsWritten++;
 
             var components = await _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken);
-            var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
             stats.ComponentRowsRead += components.Count;
 
             foreach (var component in components)
@@ -111,8 +124,8 @@ public sealed class PrenosJob
 
                     unified.Add(new UnifiedItem(
                         order.OrderNumber,
-                        order.Material,
-                        component.Material,
+                        formattedPlateMaterial,
+                        FormatMaterialLikeDelphi(component.Material),
                         component.Description,
                         rule.Name,
                         missingQty,
@@ -136,6 +149,9 @@ public sealed class PrenosJob
                 }
             }
         }
+
+        ClearSingleLineStatus();
+        Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
 
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
     }
@@ -202,8 +218,8 @@ public sealed class PrenosJob
 
             unified.Add(new UnifiedItem(
                 plateOrder.OrderNumber,
-                plateOrder.Material,
-                semiComponent.Material,
+                FormatMaterialLikeDelphi(plateOrder.Material),
+                FormatMaterialLikeDelphi(semiComponent.Material),
                 $"AFRU delta for {subOrder.OrderNumber}",
                 $"{category}_AFRU",
                 afruDelta,
@@ -239,9 +255,9 @@ public sealed class PrenosJob
             {
                 semiFinished.Add(new SemiFinishedTrace(
                     plateOrder.OrderNumber,
-                    plateOrder.Material,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
                     "Spirala",
-                    cmp.Material,
+                    FormatMaterialLikeDelphi(cmp.Material),
                     samotOrder.OrderNumber,
                     0,
                     DateTime.UtcNow));
@@ -249,8 +265,8 @@ public sealed class PrenosJob
 
                 unified.Add(new UnifiedItem(
                     plateOrder.OrderNumber,
-                    plateOrder.Material,
-                    cmp.Material,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
+                    FormatMaterialLikeDelphi(cmp.Material),
                     cmp.Description,
                     "Spirala",
                     0,
@@ -340,6 +356,64 @@ public sealed class PrenosJob
         }
     }
 
+
+    private sealed class ProgressStatus
+    {
+        private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(250);
+        private readonly Stopwatch _watch = Stopwatch.StartNew();
+        private long _lastUpdateMs = long.MinValue;
+
+        public bool ShouldRender()
+        {
+            var now = _watch.ElapsedMilliseconds;
+            if (now - _lastUpdateMs < Interval.TotalMilliseconds)
+            {
+                return false;
+            }
+
+            _lastUpdateMs = now;
+            return true;
+        }
+
+        public void ForceNext()
+        {
+            _lastUpdateMs = long.MinValue;
+        }
+    }
+
+    private static void TryRenderSingleLineStatus(string message, ProgressStatus status)
+    {
+        if (!status.ShouldRender())
+        {
+            return;
+        }
+
+        RenderSingleLineStatus(message);
+    }
+
+    private static void RenderSingleLineStatus(string message)
+    {
+        if (Console.IsOutputRedirected)
+        {
+            return;
+        }
+
+        var width = Math.Max(20, Console.WindowWidth - 1);
+        var text = message.Length > width ? message.Substring(0, width) : message;
+        Console.Write("\r" + text.PadRight(width));
+    }
+
+    private static void ClearSingleLineStatus()
+    {
+        if (Console.IsOutputRedirected)
+        {
+            return;
+        }
+
+        var width = Math.Max(20, Console.WindowWidth - 1);
+        Console.Write("\r" + new string(' ', width) + "\r");
+    }
+
     private static Task WriteAllTextCompatAsync(string path, string content, CancellationToken cancellationToken)
     {
         return Task.Run(() =>
@@ -347,6 +421,30 @@ public sealed class PrenosJob
             cancellationToken.ThrowIfCancellationRequested();
             File.WriteAllText(path, content);
         }, cancellationToken);
+    }
+
+
+    private static string FormatMaterialLikeDelphi(string material)
+    {
+        if (string.IsNullOrWhiteSpace(material))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = material.Trim();
+        if (trimmed.Length < 18 || trimmed.Any(c => !char.IsDigit(c)))
+        {
+            return trimmed;
+        }
+
+        return string.Concat(
+            trimmed.Substring(4, 2),
+            ".",
+            trimmed.Substring(6, 5),
+            ".",
+            trimmed.Substring(11, 3),
+            "/",
+            trimmed.Substring(16, 2));
     }
 
     private static int ParseTrack(string trackCode)
