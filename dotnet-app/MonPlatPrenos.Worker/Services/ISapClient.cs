@@ -18,6 +18,8 @@ public interface ISapClient
 
     Task<IReadOnlyList<SapOperation>> GetOperationsAsync(string orderNumber, CancellationToken cancellationToken);
 
+    Task<SapOrderDetail> GetOrderDetailAsync(string orderNumber, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SapComponent>> GetComponentsAsync(string orderNumber, CancellationToken cancellationToken);

@@ -70,23 +70,6 @@ public sealed class SapDllSapClient : ISapClient
         public readonly List<long> Samples = new List<long>();
     }
 
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
-    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CountPropertyCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> RowIndexerCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByNameCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByNameCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByIndexCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByIndexCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> CreateFunctionCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueNameObjectCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueIndexObjectCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
-
     public SapDllSapClient(SapIntegrationOptions options)
     {
         _options = options;
@@ -279,33 +262,30 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var operationTable = GetTable(function, "OPERATION");
-        var results = new List<SapOperation>();
-
-        foreach (var row in EnumerateRows(operationTable))
-        {
-            var confirmation = GetFirstString(row, "CONF_NO", "CONFIRMATION", "RUECK");
-            var operationCode = GetFirstString(row, "OPR", "ACTIVITY", "LTXA1");
-            var stepCode = GetFirstString(row, "OPER", "VORNR", "SUB_ACTIVITY");
-            var confirmableQty = ParseInt(GetFirstString(row, "QUANTITY", "CONFIRMABLE_QTY", "BMSCH"));
-            var workCenterCode = GetFirstString(row, "WORK_CNTR", "WORKCENTER", "WORK_CENTER", "ARBPL", "STEUS");
-
-            if (string.IsNullOrWhiteSpace(operationCode))
-            {
-                continue;
-            }
-
-            results.Add(new SapOperation(
-                orderNumber.Trim(),
-                confirmation.Trim(),
-                operationCode.Trim(),
-                confirmableQty,
-                stepCode.Trim(),
-                workCenterCode.Trim()));
-        }
+        var results = ParseOperations(orderNumber, operationTable);
 
 
         AddDetailedTiming("GetOperations.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult<IReadOnlyList<SapOperation>>(results);
+    }
+
+    public Task<SapOrderDetail> GetOrderDetailAsync(string orderNumber, CancellationToken cancellationToken)
+    {
+        var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
+        SetImport(function, "NUMBER", orderNumber);
+        SetOrderObjectsFlag(function, 4, "OPERATION", "OPERATIONS");
+        SetOrderObjectsFlag(function, 3, "COMPONENT", "COMPONENTS");
+
+        var invokeSw = Stopwatch.StartNew();
+        InvokeFunction(function);
+        AddDetailedTiming("GetOrderDetailBundle.Invoke", invokeSw.ElapsedMilliseconds);
+
+        var parseSw = Stopwatch.StartNew();
+        var operations = ParseOperations(orderNumber, GetTable(function, "OPERATION"));
+        var components = ParseComponents(orderNumber, GetTable(function, "COMPONENT"));
+        AddDetailedTiming("GetOrderDetailBundle.Parse", parseSw.ElapsedMilliseconds);
+
+        return Task.FromResult(new SapOrderDetail(operations, components));
     }
 
     public Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken)
@@ -364,23 +344,7 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var componentTable = GetTable(function, "COMPONENT");
-        var results = new List<SapComponent>();
-
-        foreach (var row in EnumerateRows(componentTable))
-        {
-            var material = GetFirstString(row, "MATERIAL", "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR");
-            var description = GetFirstString(row, "MATERIAL_DESCRIPTION", "DESCRIPTION", "MAKTX", "DESCRIPTION1");
-
-            if (string.IsNullOrWhiteSpace(material))
-            {
-                continue;
-            }
-
-            results.Add(new SapComponent(
-                orderNumber.Trim(),
-                material.Trim(),
-                description.Trim()));
-        }
+        var results = ParseComponents(orderNumber, componentTable);
 
 
         AddDetailedTiming("GetComponents.Parse", parseSw.ElapsedMilliseconds);
@@ -488,6 +452,56 @@ public sealed class SapDllSapClient : ISapClient
 
         AddDetailedTiming("GetAfruYieldDelta.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult(yi1 - yi2);
+    }
+
+    private static List<SapOperation> ParseOperations(string orderNumber, object operationTable)
+    {
+        var results = new List<SapOperation>();
+        foreach (var row in EnumerateRows(operationTable))
+        {
+            var confirmation = GetFirstString(row, "CONF_NO", "CONFIRMATION", "RUECK");
+            var operationCode = GetFirstString(row, "OPR", "ACTIVITY", "LTXA1");
+            var stepCode = GetFirstString(row, "OPER", "VORNR", "SUB_ACTIVITY");
+            var confirmableQty = ParseInt(GetFirstString(row, "QUANTITY", "CONFIRMABLE_QTY", "BMSCH"));
+            var workCenterCode = GetFirstString(row, "WORK_CNTR", "WORKCENTER", "WORK_CENTER", "ARBPL", "STEUS");
+
+            if (string.IsNullOrWhiteSpace(operationCode))
+            {
+                continue;
+            }
+
+            results.Add(new SapOperation(
+                orderNumber.Trim(),
+                confirmation.Trim(),
+                operationCode.Trim(),
+                confirmableQty,
+                stepCode.Trim(),
+                workCenterCode.Trim()));
+        }
+
+        return results;
+    }
+
+    private static List<SapComponent> ParseComponents(string orderNumber, object componentTable)
+    {
+        var results = new List<SapComponent>();
+        foreach (var row in EnumerateRows(componentTable))
+        {
+            var material = GetFirstString(row, "MATERIAL", "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR");
+            var description = GetFirstString(row, "MATERIAL_DESCRIPTION", "DESCRIPTION", "MAKTX", "DESCRIPTION1");
+
+            if (string.IsNullOrWhiteSpace(material))
+            {
+                continue;
+            }
+
+            results.Add(new SapComponent(
+                orderNumber.Trim(),
+                material.Trim(),
+                description.Trim()));
+        }
+
+        return results;
     }
 
     private object CreateFunction(string functionName)
