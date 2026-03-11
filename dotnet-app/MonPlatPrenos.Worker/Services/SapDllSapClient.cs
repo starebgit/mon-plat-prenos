@@ -168,7 +168,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectsFlag(function, "OPERATION");
+        SetOrderObjectsFlag(function, 4, "OPERATION", "OPERATIONS");
 
         InvokeFunction(function);
 
@@ -237,7 +237,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectsFlag(function, "COMPONENT");
+        SetOrderObjectsFlag(function, 3, "COMPONENT", "COMPONENTS");
 
         InvokeFunction(function);
 
@@ -590,6 +590,18 @@ public sealed class SapDllSapClient : ISapClient
                      ?? throw new InvalidOperationException($"Could not find Append() for table {tableName}.");
         append.Invoke(table, null);
 
+        if (TrySetFieldOnTable(table, "SIGN", "I")
+            && TrySetFieldOnTable(table, "OPTION", option)
+            && TrySetFieldOnTable(table, "LOW", low))
+        {
+            if (!string.IsNullOrWhiteSpace(high))
+            {
+                TrySetFieldOnTable(table, "HIGH", high);
+            }
+
+            return;
+        }
+
         var currentRow = table.GetType().GetProperty("CurrentRow")?.GetValue(table);
         if (currentRow is null)
         {
@@ -621,6 +633,18 @@ public sealed class SapDllSapClient : ISapClient
         }
     }
 
+    private static bool TrySetFieldOnTable(object table, string fieldName, string value)
+    {
+        var setValue = table.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) });
+        if (setValue is null)
+        {
+            return false;
+        }
+
+        setValue.Invoke(table, new object[] { fieldName, value });
+        return true;
+    }
+
     private static void SetImport(object function, string importName, string value)
     {
         var setValue = function.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) })
@@ -628,7 +652,7 @@ public sealed class SapDllSapClient : ISapClient
         setValue.Invoke(function, new object[] { importName, value });
     }
 
-    private static void SetOrderObjectsFlag(object function, string fieldName)
+    private static void SetOrderObjectsFlag(object function, int preferredIndex, params string[] fieldNames)
     {
         var getStructure = function.GetType().GetMethod("GetStructure", new[] { typeof(string) })
                           ?? throw new InvalidOperationException("Could not find function.GetStructure(string).");
@@ -636,10 +660,51 @@ public sealed class SapDllSapClient : ISapClient
         var structure = getStructure.Invoke(function, new object[] { "ORDER_OBJECTS" })
                        ?? throw new InvalidOperationException("ORDER_OBJECTS structure is null.");
 
-        var setValue = structure.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) })
-                       ?? throw new InvalidOperationException("Could not find structure.SetValue(string, object).");
+        var setValueByIndex = structure.GetType().GetMethod("SetValue", new[] { typeof(int), typeof(object) });
+        if (setValueByIndex is not null)
+        {
+            foreach (var index in new[] { preferredIndex, preferredIndex - 1 })
+            {
+                if (index < 0)
+                {
+                    continue;
+                }
 
-        setValue.Invoke(structure, new object[] { fieldName, "X" });
+                if (TryInvoke(() => setValueByIndex.Invoke(structure, new object[] { index, "X" })))
+                {
+                    return;
+                }
+            }
+        }
+
+        var setValueByName = structure.GetType().GetMethod("SetValue", new[] { typeof(string), typeof(object) });
+        if (setValueByName is null)
+        {
+            throw new InvalidOperationException("Could not find structure.SetValue(string, object) or structure.SetValue(int, object).");
+        }
+
+        foreach (var fieldName in fieldNames)
+        {
+            if (TryInvoke(() => setValueByName.Invoke(structure, new object[] { fieldName, "X" })))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException($"Could not set ORDER_OBJECTS selection. Tried indexes {preferredIndex}/{preferredIndex - 1} and fields: {string.Join(", ", fieldNames)}.");
+    }
+
+    private static bool TryInvoke(Action invoke)
+    {
+        try
+        {
+            invoke();
+            return true;
+        }
+        catch (TargetInvocationException)
+        {
+            return false;
+        }
     }
 
     private static object GetStructure(object function, string structureName)
@@ -679,11 +744,28 @@ public sealed class SapDllSapClient : ISapClient
         }
     }
 
-    private static void InvokeFunction(object function)
+    private void InvokeFunction(object function)
     {
-        var invoke = function.GetType().GetMethod("Invoke")
-                     ?? throw new InvalidOperationException("Could not find function.Invoke().");
-        invoke.Invoke(function, null);
+        var functionType = function.GetType();
+
+        var invokeWithoutParameters = functionType.GetMethod("Invoke", Type.EmptyTypes);
+        if (invokeWithoutParameters is not null)
+        {
+            invokeWithoutParameters.Invoke(function, null);
+            return;
+        }
+
+        var invokeWithDestination = functionType
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(m => m.Name == "Invoke" && m.GetParameters().Length == 1);
+
+        if (invokeWithDestination is null)
+        {
+            throw new InvalidOperationException("Could not find function.Invoke() overload.");
+        }
+
+        var destination = GetDestination();
+        invokeWithDestination.Invoke(function, new[] { destination });
     }
 
     private static void SetField(object row, string fieldName, string value)
