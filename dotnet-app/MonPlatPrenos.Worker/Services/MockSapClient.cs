@@ -38,8 +38,8 @@ public sealed class MockSapClient : ISapClient
     {
         IReadOnlyList<SapOperation> result = new List<SapOperation>
         {
-            new SapOperation(orderNumber, "C1", "PP04", 10, "0010"),
-            new SapOperation(orderNumber, "C2", "PP99", 5, "0010")
+            new SapOperation(orderNumber, "C1", "PP04", 10, "0010", ""),
+            new SapOperation(orderNumber, "C2", "PP99", 5, "0010", "")
         };
 
         return Task.FromResult(result);
