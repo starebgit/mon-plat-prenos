@@ -377,6 +377,8 @@ public sealed class SapDllSapClient : ISapClient
         var destinationManagerType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcDestinationManager")
                                      ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcDestinationManager not found in sapnco.dll.");
 
+        var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
+
         if (HasInlineDestinationConfig())
         {
             var configType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcConfigParameters")
@@ -392,7 +394,6 @@ public sealed class SapDllSapClient : ISapClient
             var config = Activator.CreateInstance(configType)
                          ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
 
-            var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
             var language = string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language;
 
             // NCo expects technical RfcConfigParameters keys (NAME/ASHOST/SYSNR/CLIENT/USER/PASSWD/LANG/SAPROUTER).
@@ -416,8 +417,6 @@ public sealed class SapDllSapClient : ISapClient
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .FirstOrDefault(m => m.Name == "GetDestination" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string))
             ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(string) not found.");
-
-        var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
 
         return getByName.Invoke(null, new object[] { destinationName })
                ?? throw new InvalidOperationException($"GetDestination returned null for destination {destinationName}.");
