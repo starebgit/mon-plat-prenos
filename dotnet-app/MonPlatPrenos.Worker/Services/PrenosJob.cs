@@ -32,6 +32,7 @@ public sealed class PrenosJob
 
         var stats = new ProcessingStats();
 
+        RenderSingleLineStatus("Fetching production orders from SAP...");
         var orders = await _sapClient.GetProductionOrdersForPlatesAsync(
             plant,
             _options.SchedulerCode,
@@ -41,13 +42,16 @@ public sealed class PrenosJob
             cancellationToken);
 
         stats.TotalOrdersFetched = orders.Count;
+        RenderSingleLineStatus($"Fetched {orders.Count} production orders. Processing...");
 
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
         var semiFinished = new List<SemiFinishedTrace>();
 
-        foreach (var order in orders)
+        for (var orderIndex = 0; orderIndex < orders.Count; orderIndex++)
         {
+            var order = orders[orderIndex];
+            RenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | Current: {order.OrderNumber} | Plates: {stats.PlateRecordsWritten} | Unified: {stats.UnifiedRowsWritten}");
             if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
             {
                 stats.SkippedByDateFilter++;
@@ -78,8 +82,10 @@ public sealed class PrenosJob
             stats.ValidOperations += validOperations.Count;
 
             var totalYield = 0;
-            foreach (var op in validOperations)
+            for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
             {
+                var op = validOperations[operationIndex];
+                RenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Ops {operationIndex + 1}/{validOperations.Count}");
                 var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
                 stats.ConfirmationRowsRead += confirmations.Count;
                 totalYield += confirmations.Sum(c => c.Yield);
@@ -140,6 +146,9 @@ public sealed class PrenosJob
                 }
             }
         }
+
+        ClearSingleLineStatus();
+        Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
 
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
     }
@@ -342,6 +351,29 @@ public sealed class PrenosJob
 
             await WriteAllTextCompatAsync(textPath, sb.ToString(), cancellationToken);
         }
+    }
+
+    private static void RenderSingleLineStatus(string message)
+    {
+        if (Console.IsOutputRedirected)
+        {
+            return;
+        }
+
+        var width = Math.Max(20, Console.WindowWidth - 1);
+        var text = message.Length > width ? message.Substring(0, width) : message;
+        Console.Write("\r" + text.PadRight(width));
+    }
+
+    private static void ClearSingleLineStatus()
+    {
+        if (Console.IsOutputRedirected)
+        {
+            return;
+        }
+
+        var width = Math.Max(20, Console.WindowWidth - 1);
+        Console.Write("\r" + new string(' ', width) + "\r");
     }
 
     private static Task WriteAllTextCompatAsync(string path, string content, CancellationToken cancellationToken)
