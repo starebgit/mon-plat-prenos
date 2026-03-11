@@ -76,7 +76,7 @@ public static class Program
                 var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
                 var runDate = TryGetDateArg(args, "--from-date") ?? DateTime.Today;
                 Console.WriteLine($"RUN-ONCE PRENOS DAY : {runDate:yyyy-MM-dd}");
-                await job.RunAsync(runDate, CancellationToken.None).ConfigureAwait(false);
+                await job.RunAsync(runDate, System.Threading.CancellationToken.None).ConfigureAwait(false);
                 Console.WriteLine("RUN-ONCE PRENOS DONE");
             }
 

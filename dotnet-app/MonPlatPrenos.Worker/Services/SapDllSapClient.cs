@@ -86,85 +86,9 @@ public sealed class SapDllSapClient : ISapClient
 
 
         TryLoadSapLoginFromDatabase();
-        RegisterDestinationConfigurationIfConfigured();
     }
 
 
-    private class ReflectionDestinationConfigurationProxy : DispatchProxy
-    {
-        private Assembly _sapAssembly = null!;
-        private SapIntegrationOptions _options = null!;
-        public void Initialize(Assembly sapAssembly, SapIntegrationOptions options)
-        {
-            _sapAssembly = sapAssembly;
-            _options = options;
-        }
-
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
-        {
-            if (targetMethod is null)
-            {
-                throw new InvalidOperationException("Destination configuration proxy received null targetMethod.");
-            }
-
-            if (string.Equals(targetMethod.Name, "get_ChangeEventsSupported", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            if (string.Equals(targetMethod.Name, "GetParameters", StringComparison.Ordinal))
-            {
-                var destinationName = Convert.ToString(args?[0], CultureInfo.InvariantCulture);
-                var expectedName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
-                if (!string.Equals(destinationName, expectedName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return null;
-                }
-
-                var configParametersType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcConfigParameters")
-                                           ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcConfigParameters not found.");
-
-                var instance = Activator.CreateInstance(configParametersType)
-                               ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
-
-                SetParam(instance, "Name", expectedName);
-                SetParam(instance, "AppServerHost", _options.AppServerHost);
-                SetParam(instance, "SystemNumber", _options.SystemNumber);
-                SetParam(instance, "Client", _options.Client);
-                SetParam(instance, "User", _options.User);
-                SetParam(instance, "Password", _options.Password);
-                SetParam(instance, "Language", string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language);
-
-                if (!string.IsNullOrWhiteSpace(_options.Router))
-                {
-                    SetParam(instance, "SAPRouter", _options.Router);
-                }
-
-                return instance;
-            }
-
-            if (string.Equals(targetMethod.Name, "add_ConfigurationChanged", StringComparison.Ordinal)
-                || string.Equals(targetMethod.Name, "remove_ConfigurationChanged", StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            throw new NotSupportedException($"IDestinationConfiguration method '{targetMethod.Name}' is not supported by proxy.");
-        }
-
-        private static void SetParam(object configParams, string key, string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return;
-            }
-
-            var setValue = configParams.GetType().GetMethod("set_Item", new[] { typeof(string), typeof(string) })
-                           ?? throw new InvalidOperationException("RfcConfigParameters indexer setter not found.");
-
-            setValue.Invoke(configParams, new object[] { key, value });
-        }
-    }
 
 
     private static string ResolveSapPath(string configuredPath, string defaultFileName)
@@ -453,14 +377,45 @@ public sealed class SapDllSapClient : ISapClient
         var destinationManagerType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcDestinationManager")
                                      ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcDestinationManager not found in sapnco.dll.");
 
-        var getDestination = destinationManagerType
+        if (HasInlineDestinationConfig())
+        {
+            var configType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcConfigParameters")
+                             ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcConfigParameters not found in sapnco.dll.");
+
+            var getByConfig = destinationManagerType
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "GetDestination"
+                                     && m.GetParameters().Length == 1
+                                     && m.GetParameters()[0].ParameterType.FullName == configType.FullName)
+                ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(RfcConfigParameters) not found.");
+
+            var config = Activator.CreateInstance(configType)
+                         ?? throw new InvalidOperationException("Could not instantiate RfcConfigParameters.");
+
+            SetParam(config, "Name", string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName);
+            SetParam(config, "AppServerHost", _options.AppServerHost);
+            SetParam(config, "SystemNumber", _options.SystemNumber);
+            SetParam(config, "Client", _options.Client);
+            SetParam(config, "User", _options.User);
+            SetParam(config, "Password", _options.Password);
+            SetParam(config, "Language", string.IsNullOrWhiteSpace(_options.Language) ? "EN" : _options.Language);
+            if (!string.IsNullOrWhiteSpace(_options.Router))
+            {
+                SetParam(config, "SAPRouter", _options.Router);
+            }
+
+            return getByConfig.Invoke(null, new[] { config })
+                   ?? throw new InvalidOperationException("GetDestination(RfcConfigParameters) returned null.");
+        }
+
+        var getByName = destinationManagerType
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .FirstOrDefault(m => m.Name == "GetDestination" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string))
             ?? throw new InvalidOperationException("RfcDestinationManager.GetDestination(string) not found.");
 
         var destinationName = string.IsNullOrWhiteSpace(_options.DestinationName) ? "MONPLAT" : _options.DestinationName;
 
-        return getDestination.Invoke(null, new object[] { destinationName })
+        return getByName.Invoke(null, new object[] { destinationName })
                ?? throw new InvalidOperationException($"GetDestination returned null for destination {destinationName}.");
     }
 
@@ -594,50 +549,7 @@ public sealed class SapDllSapClient : ISapClient
         };
     }
 
-    private void RegisterDestinationConfigurationIfConfigured()
-    {
-        if (!HasInlineDestinationConfig())
-        {
-            return;
-        }
 
-        var providerType = _sapAssembly.GetType("SAP.Middleware.Connector.IDestinationConfiguration")
-                          ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.IDestinationConfiguration not found in sapnco.dll.");
-
-        var destinationManagerType = _sapAssembly.GetType("SAP.Middleware.Connector.RfcDestinationManager")
-                                     ?? throw new InvalidOperationException("Type SAP.Middleware.Connector.RfcDestinationManager not found in sapnco.dll.");
-
-        var registerMethod = destinationManagerType
-            .GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .FirstOrDefault(m => m.Name == "RegisterDestinationConfiguration"
-                              && m.GetParameters().Length == 1
-                              && m.GetParameters()[0].ParameterType.FullName == providerType.FullName)
-            ?? throw new InvalidOperationException("RfcDestinationManager.RegisterDestinationConfiguration(...) not found.");
-
-        try
-        {
-            var createMethod = typeof(DispatchProxy)
-                .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "Create" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 2)
-                ?? throw new InvalidOperationException("DispatchProxy.Create<T, TProxy>() not found.");
-
-            var closedCreate = createMethod.MakeGenericMethod(providerType, typeof(ReflectionDestinationConfigurationProxy));
-            var proxy = closedCreate.Invoke(null, null)
-                ?? throw new InvalidOperationException("Could not create SAP destination configuration proxy.");
-
-            if (proxy is not ReflectionDestinationConfigurationProxy impl)
-            {
-                throw new InvalidOperationException("Created SAP destination proxy has unexpected runtime type.");
-            }
-
-            impl.Initialize(_sapAssembly, _options);
-            registerMethod.Invoke(null, new object[] { proxy });
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Destination registration failed: {0}: {1}", ex.GetType().Name, ex.Message));
-        }
-    }
 
     private bool HasInlineDestinationConfig()
     {
@@ -647,6 +559,20 @@ public sealed class SapDllSapClient : ISapClient
                && !string.IsNullOrWhiteSpace(_options.User)
                && !string.IsNullOrWhiteSpace(_options.Password);
     }
+
+    private static void SetParam(object configParams, string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var setValue = configParams.GetType().GetMethod("set_Item", new[] { typeof(string), typeof(string) })
+                       ?? throw new InvalidOperationException("RfcConfigParameters indexer setter not found.");
+
+        setValue.Invoke(configParams, new object[] { key, value });
+    }
+
 
     private static void FillRange(object function, string tableName, string option, string low, string? high = null)
     {
