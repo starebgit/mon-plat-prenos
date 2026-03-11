@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using MonPlatPrenos.Worker.Models;
 using Microsoft.Extensions.Options;
 
@@ -31,6 +32,9 @@ public sealed class PrenosJob
         var orderFrom = "000005223286";
 
         var stats = new ProcessingStats();
+        var status = new ProgressStatus();
+        var operationCodes = new HashSet<string>(_options.OperationCodes, StringComparer.OrdinalIgnoreCase);
+        var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
 
         RenderSingleLineStatus("Fetching production orders from SAP...");
         var orders = await _sapClient.GetProductionOrdersForPlatesAsync(
@@ -43,6 +47,7 @@ public sealed class PrenosJob
 
         stats.TotalOrdersFetched = orders.Count;
         RenderSingleLineStatus($"Fetched {orders.Count} production orders. Processing...");
+        status.ForceNext();
 
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
@@ -51,7 +56,7 @@ public sealed class PrenosJob
         for (var orderIndex = 0; orderIndex < orders.Count; orderIndex++)
         {
             var order = orders[orderIndex];
-            RenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | Current: {order.OrderNumber} | Plates: {stats.PlateRecordsWritten} | Unified: {stats.UnifiedRowsWritten}");
+            TryRenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | Current: {order.OrderNumber} | Plates: {stats.PlateRecordsWritten} | Unified: {stats.UnifiedRowsWritten}", status);
             if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
             {
                 stats.SkippedByDateFilter++;
@@ -73,7 +78,7 @@ public sealed class PrenosJob
             stats.OrdersAfterCoreFilters++;
             var operations = await _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken);
             var validOperations = operations
-                .Where(o => _options.OperationCodes.Any(code => string.Equals(code, o.OperationCode, StringComparison.OrdinalIgnoreCase)))
+                .Where(o => operationCodes.Contains(o.OperationCode))
                 .Where(o => o.ConfirmableQty > 0)
                 .Where(o => o.StepCode == "0010")
                 .ToList();
@@ -85,7 +90,6 @@ public sealed class PrenosJob
             for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
             {
                 var op = validOperations[operationIndex];
-                RenderSingleLineStatus($"Orders {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Ops {operationIndex + 1}/{validOperations.Count}");
                 var confirmations = await _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken);
                 stats.ConfirmationRowsRead += confirmations.Count;
                 totalYield += confirmations.Sum(c => c.Yield);
@@ -107,7 +111,6 @@ public sealed class PrenosJob
             stats.PlateRecordsWritten++;
 
             var components = await _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken);
-            var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
             stats.ComponentRowsRead += components.Count;
 
             foreach (var component in components)
@@ -351,6 +354,41 @@ public sealed class PrenosJob
 
             await WriteAllTextCompatAsync(textPath, sb.ToString(), cancellationToken);
         }
+    }
+
+
+    private sealed class ProgressStatus
+    {
+        private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(250);
+        private readonly Stopwatch _watch = Stopwatch.StartNew();
+        private long _lastUpdateMs = long.MinValue;
+
+        public bool ShouldRender()
+        {
+            var now = _watch.ElapsedMilliseconds;
+            if (now - _lastUpdateMs < Interval.TotalMilliseconds)
+            {
+                return false;
+            }
+
+            _lastUpdateMs = now;
+            return true;
+        }
+
+        public void ForceNext()
+        {
+            _lastUpdateMs = long.MinValue;
+        }
+    }
+
+    private static void TryRenderSingleLineStatus(string message, ProgressStatus status)
+    {
+        if (!status.ShouldRender())
+        {
+            return;
+        }
+
+        RenderSingleLineStatus(message);
     }
 
     private static void RenderSingleLineStatus(string message)
