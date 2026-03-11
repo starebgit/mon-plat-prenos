@@ -24,10 +24,7 @@ public static class Program
             })
             .ConfigureLogging(logging =>
             {
-                if (runOnce)
-                {
-                    logging.ClearProviders();
-                }
+                logging.ClearProviders();
             })
             .ConfigureServices((context, services) =>
             {

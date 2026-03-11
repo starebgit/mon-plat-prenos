@@ -493,7 +493,7 @@ public sealed class SapDllSapClient : ISapClient
         {
             _loginSource = "none";
             _loginMessage = "SapLoginConnectionString is empty; DB lookup skipped.";
-            _logger.LogInformation("SapLoginConnectionString is empty; skipping DB login lookup.");
+            Console.WriteLine("SAP-LOGIN: SapLoginConnectionString is empty; DB lookup skipped.");
             return;
         }
 
@@ -521,7 +521,7 @@ public sealed class SapDllSapClient : ISapClient
                         {
                             _loginSource = "db";
                             _loginMessage = string.Format(CultureInfo.InvariantCulture, "No row found in table prijava for ident={0}.", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni='X'>");
-                            _logger.LogWarning("No SAP login row found in table prijava (ident={Ident}).", _options.SapLoginIdent);
+                            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: No row found in table prijava (ident={0}).", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni=\'X\'>"));
                             return;
                         }
 
@@ -547,20 +547,20 @@ public sealed class SapDllSapClient : ISapClient
             {
                 _loginSource = "db";
                 _loginMessage = "Loaded SAP login values from table prijava.";
-                _logger.LogInformation("Loaded SAP login from DB for destination {DestinationName}.", _options.DestinationName);
+                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Loaded login from DB for destination {0}.", _options.DestinationName));
             }
             else
             {
                 _loginSource = "db";
                 _loginMessage = "DB lookup executed, but required fields are still incomplete.";
-                _logger.LogWarning("SAP login lookup from DB succeeded but required fields are still incomplete.");
+                Console.WriteLine("SAP-LOGIN: DB lookup ran, but required fields are still incomplete.");
             }
         }
         catch (Exception ex)
         {
             _loginSource = "db";
             _loginMessage = string.Format(CultureInfo.InvariantCulture, "DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message);
-            _logger.LogWarning(ex, "Failed to load SAP login from DB.");
+            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message));
         }
     }
 

@@ -24,6 +24,8 @@ Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths fro
 cd dotnet-app/MonPlatPrenos.Worker
 # one-time run for login check only (prints SAP login config/DB result and exits):
 dotnet run -- --run-once
+# if you already built once and want to avoid build/roslyn noise:
+dotnet run --no-build -- --run-once
 
 
 # scheduler mode (runs every day at DailyRunTime):
