@@ -45,23 +45,6 @@ public sealed class SapDllSapClient : ISapClient
     private readonly Dictionary<string, DetailedTimingItem> _detailedTimings = new Dictionary<string, DetailedTimingItem>(StringComparer.Ordinal);
 
 
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
-    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CountPropertyCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> RowIndexerCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByNameCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByNameCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByIndexCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByIndexCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> CreateFunctionCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueNameObjectCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueIndexObjectCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
-
     private sealed class DetailedTimingItem
     {
         public long Count;
@@ -70,14 +53,34 @@ public sealed class SapDllSapClient : ISapClient
         public readonly List<long> Samples = new List<long>();
     }
 
+    private sealed class RowAccessorCacheItem
+    {
+        public MethodInfo? GetStringByName;
+        public MethodInfo? GetValueByName;
+        public MethodInfo? GetStringByIndex;
+        public MethodInfo? GetValueByIndex;
+        public readonly ConcurrentDictionary<string, NameAccessorKind> NameAccessorKinds = new(StringComparer.Ordinal);
+        public readonly ConcurrentDictionary<int, IndexAccessorKind> IndexAccessorKinds = new();
+    }
+
+    private enum NameAccessorKind
+    {
+        None = 0,
+        GetString = 1,
+        GetValue = 2
+    }
+
+    private enum IndexAccessorKind
+    {
+        None = 0,
+        GetString = 1,
+        GetValue = 2
+    }
+
     private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeNoArgCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> InvokeSingleArgCache = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> CountPropertyCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> RowIndexerCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByNameCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByNameCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStringByIndexCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo?> GetValueByIndexCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> CreateFunctionCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
@@ -86,6 +89,7 @@ public sealed class SapDllSapClient : ISapClient
     private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
+    private static readonly ConcurrentDictionary<Type, RowAccessorCacheItem> RowAccessorCache = new();
 
     public SapDllSapClient(SapIntegrationOptions options)
     {
@@ -962,25 +966,50 @@ public sealed class SapDllSapClient : ISapClient
 
     private static string GetString(object row, string fieldName)
     {
-        try
-        {
-            var rowType = row.GetType();
-            var getString = GetStringByNameCache.GetOrAdd(rowType, t => t.GetMethod("GetString", new[] { typeof(string) }));
-            if (getString is not null)
-            {
-                return Convert.ToString(getString.Invoke(row, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
-            }
-
-            var getValue = GetValueByNameCache.GetOrAdd(rowType, t => t.GetMethod("GetValue", new[] { typeof(string) }));
-            if (getValue is not null)
-            {
-                return Convert.ToString(getValue.Invoke(row, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
-            }
-        }
-        catch
+        if (string.IsNullOrWhiteSpace(fieldName))
         {
             return string.Empty;
         }
+
+        var rowType = row.GetType();
+        var cache = RowAccessorCache.GetOrAdd(rowType, CreateRowAccessorCacheItem);
+        var kind = cache.NameAccessorKinds.GetOrAdd(fieldName, _ => NameAccessorKind.None);
+
+        if (kind == NameAccessorKind.GetString)
+        {
+            if (TryInvokeStringAccessor(row, cache.GetStringByName, fieldName, out var value))
+            {
+                return value;
+            }
+
+            cache.NameAccessorKinds[fieldName] = NameAccessorKind.None;
+            return string.Empty;
+        }
+
+        if (kind == NameAccessorKind.GetValue)
+        {
+            if (TryInvokeStringAccessor(row, cache.GetValueByName, fieldName, out var value))
+            {
+                return value;
+            }
+
+            cache.NameAccessorKinds[fieldName] = NameAccessorKind.None;
+            return string.Empty;
+        }
+
+        if (TryInvokeStringAccessor(row, cache.GetStringByName, fieldName, out var getStringValue))
+        {
+            cache.NameAccessorKinds[fieldName] = NameAccessorKind.GetString;
+            return getStringValue;
+        }
+
+        if (TryInvokeStringAccessor(row, cache.GetValueByName, fieldName, out var getValueResult))
+        {
+            cache.NameAccessorKinds[fieldName] = NameAccessorKind.GetValue;
+            return getValueResult;
+        }
+
+        cache.NameAccessorKinds[fieldName] = NameAccessorKind.None;
 
         return string.Empty;
     }
@@ -988,27 +1017,98 @@ public sealed class SapDllSapClient : ISapClient
 
     private static string GetStringByIndex(object row, int index)
     {
-        try
+        var rowType = row.GetType();
+        var cache = RowAccessorCache.GetOrAdd(rowType, CreateRowAccessorCacheItem);
+        var kind = cache.IndexAccessorKinds.GetOrAdd(index, _ => IndexAccessorKind.None);
+
+        if (kind == IndexAccessorKind.GetString)
         {
-            var rowType = row.GetType();
-            var getStringByIndex = GetStringByIndexCache.GetOrAdd(rowType, t => t.GetMethod("GetString", new[] { typeof(int) }));
-            if (getStringByIndex is not null)
+            if (TryInvokeStringAccessor(row, cache.GetStringByIndex, index, out var value))
             {
-                return Convert.ToString(getStringByIndex.Invoke(row, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
+                return value;
             }
 
-            var getValueByIndex = GetValueByIndexCache.GetOrAdd(rowType, t => t.GetMethod("GetValue", new[] { typeof(int) }));
-            if (getValueByIndex is not null)
-            {
-                return Convert.ToString(getValueByIndex.Invoke(row, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
-            }
-        }
-        catch
-        {
+            cache.IndexAccessorKinds[index] = IndexAccessorKind.None;
             return string.Empty;
         }
 
+        if (kind == IndexAccessorKind.GetValue)
+        {
+            if (TryInvokeStringAccessor(row, cache.GetValueByIndex, index, out var value))
+            {
+                return value;
+            }
+
+            cache.IndexAccessorKinds[index] = IndexAccessorKind.None;
+            return string.Empty;
+        }
+
+        if (TryInvokeStringAccessor(row, cache.GetStringByIndex, index, out var getStringValue))
+        {
+            cache.IndexAccessorKinds[index] = IndexAccessorKind.GetString;
+            return getStringValue;
+        }
+
+        if (TryInvokeStringAccessor(row, cache.GetValueByIndex, index, out var getValueResult))
+        {
+            cache.IndexAccessorKinds[index] = IndexAccessorKind.GetValue;
+            return getValueResult;
+        }
+
+        cache.IndexAccessorKinds[index] = IndexAccessorKind.None;
+
         return string.Empty;
+    }
+
+    private static RowAccessorCacheItem CreateRowAccessorCacheItem(Type rowType)
+    {
+        return new RowAccessorCacheItem
+        {
+            GetStringByName = rowType.GetMethod("GetString", new[] { typeof(string) }),
+            GetValueByName = rowType.GetMethod("GetValue", new[] { typeof(string) }),
+            GetStringByIndex = rowType.GetMethod("GetString", new[] { typeof(int) }),
+            GetValueByIndex = rowType.GetMethod("GetValue", new[] { typeof(int) })
+        };
+    }
+
+    private static bool TryInvokeStringAccessor(object target, MethodInfo? accessor, string fieldName, out string value)
+    {
+        if (accessor is null)
+        {
+            value = string.Empty;
+            return false;
+        }
+
+        try
+        {
+            value = Convert.ToString(accessor.Invoke(target, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
+            return true;
+        }
+        catch (TargetInvocationException)
+        {
+            value = string.Empty;
+            return false;
+        }
+    }
+
+    private static bool TryInvokeStringAccessor(object target, MethodInfo? accessor, int index, out string value)
+    {
+        if (accessor is null)
+        {
+            value = string.Empty;
+            return false;
+        }
+
+        try
+        {
+            value = Convert.ToString(accessor.Invoke(target, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
+            return true;
+        }
+        catch (TargetInvocationException)
+        {
+            value = string.Empty;
+            return false;
+        }
     }
 
     private static int DigitsOnly(string input)
