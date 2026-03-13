@@ -317,11 +317,11 @@ public sealed class SapDllSapClient : ISapClient
 
         foreach (var row in EnumerateRows(operationTable))
         {
-            var confirmation = ReadMappedString(row, _fieldMap.Operation.Confirmation, "CONFIRMATION", "RUECK");
-            var operationCode = ReadMappedString(row, _fieldMap.Operation.OperationCode, "ACTIVITY", "LTXA1");
-            var stepCode = ReadMappedString(row, _fieldMap.Operation.StepCode, "VORNR", "SUB_ACTIVITY");
-            var confirmableQty = ParseInt(ReadMappedString(row, _fieldMap.Operation.ConfirmableQuantity, "CONFIRMABLE_QTY", "BMSCH"));
-            var workCenterCode = ReadMappedString(row, _fieldMap.Operation.WorkCenterCode, "WORKCENTER", "WORK_CENTER", "ARBPL", "STEUS");
+            var confirmation = GetString(row, _fieldMap.Operation.Confirmation);
+            var operationCode = GetString(row, _fieldMap.Operation.OperationCode);
+            var stepCode = GetString(row, _fieldMap.Operation.StepCode);
+            var confirmableQty = ParseInt(GetString(row, _fieldMap.Operation.ConfirmableQuantity));
+            var workCenterCode = GetString(row, _fieldMap.Operation.WorkCenterCode);
 
             if (string.IsNullOrWhiteSpace(operationCode))
             {
@@ -410,8 +410,8 @@ public sealed class SapDllSapClient : ISapClient
 
         foreach (var row in EnumerateRows(componentTable))
         {
-            var material = ReadMappedString(row, _fieldMap.Component.Material, "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR");
-            var description = ReadMappedString(row, _fieldMap.Component.Description, "DESCRIPTION", "MAKTX", "DESCRIPTION1");
+            var material = GetString(row, _fieldMap.Component.Material);
+            var description = GetString(row, _fieldMap.Component.Description);
 
             if (string.IsNullOrWhiteSpace(material))
             {
