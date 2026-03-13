@@ -36,6 +36,9 @@ public sealed class SapDllSapClient : ISapClient
     private readonly Assembly _sapAssembly;
     private readonly Assembly _sapUtilsAssembly;
     private readonly SapIntegrationOptions _options;
+    private readonly SapFieldMapOptions _fieldMap;
+    private readonly bool _strictFieldValidation;
+    private readonly bool _allowFallbackFieldAliases;
     private readonly object _destinationLock = new object();
     private object? _cachedDestination;
     private object? _cachedRepository;
@@ -90,10 +93,14 @@ public sealed class SapDllSapClient : ISapClient
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
     private static readonly ConcurrentDictionary<Type, RowAccessorCacheItem> RowAccessorCache = new();
+    private readonly ConcurrentDictionary<string, bool> _validatedFieldScopes = new(StringComparer.Ordinal);
 
     public SapDllSapClient(SapIntegrationOptions options)
     {
         _options = options;
+        _fieldMap = options.FieldMap ?? new SapFieldMapOptions();
+        _strictFieldValidation = options.StrictFieldValidation;
+        _allowFallbackFieldAliases = options.AllowFallbackFieldAliases;
         _sapDllFullPath = ResolveSapPath(options.SapDllPath, "sapnco.dll");
         _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath, "sapnco_utils.dll");
 
@@ -238,22 +245,39 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var orderHeader = GetTable(function, "ORDER_HEADER");
+        ValidateFieldsOnce("BAPI_PRODORD_GET_LIST.ORDER_HEADER", orderHeader,
+            _fieldMap.OrderHeader.OrderNumber,
+            _fieldMap.OrderHeader.Material,
+            _fieldMap.OrderHeader.SystemStatus,
+            _fieldMap.OrderHeader.PlannedQuantity,
+            _fieldMap.OrderHeader.StartDate,
+            _fieldMap.OrderHeader.SchedulerCode,
+            _fieldMap.OrderHeader.Plant);
         var results = new List<SapOrderHeader>();
 
         foreach (var row in EnumerateRows(orderHeader))
         {
-            var orderNumber = GetFirstString(row, "ORDER_NUMBER", "AUFNR");
+            var orderNumber = ReadMappedString(row, _fieldMap.OrderHeader.OrderNumber, "AUFNR");
             if (string.IsNullOrWhiteSpace(orderNumber))
             {
                 continue;
             }
 
-            var material = GetFirstString(row, "MATERIAL", "MATERIAL_EXTERNAL", "MATERIAL_LONG", "MATNR");
-            var status = GetFirstString(row, "SYSTEM_STATUS", "SYS_STATUS", "STAT");
-            var plannedQuantity = ParseInt(GetFirstString(row, "TARGET_QUANTITY", "TOTAL_PLORD_QTY", "GAMNG"));
-            var startDate = ParseDate(GetFirstString(row, "START_DATE", "BASIC_START_DATE", "GSTRP"));
-            var mappedSchedulerCode = GetFirstString(row, "PROD_SCHED", "PROD_SCHEDULER", "FEVOR", "PROD_S") ?? schedulerCode;
-            var mappedPlant = GetFirstString(row, "PRODUCTION_PLANT", "PLANT", "WERKS", "PLAN") ?? plant;
+            var material = ReadMappedString(row, _fieldMap.OrderHeader.Material, "MATERIAL_EXTERNAL", "MATERIAL_LONG", "MATNR");
+            var status = ReadMappedString(row, _fieldMap.OrderHeader.SystemStatus, "SYS_STATUS", "STAT");
+            var plannedQuantity = ParseInt(ReadMappedString(row, _fieldMap.OrderHeader.PlannedQuantity, "TOTAL_PLORD_QTY", "GAMNG"));
+            var startDate = ParseDate(ReadMappedString(row, _fieldMap.OrderHeader.StartDate, "BASIC_START_DATE", "GSTRP"));
+            var mappedSchedulerCode = ReadMappedString(row, _fieldMap.OrderHeader.SchedulerCode, "PROD_SCHEDULER", "FEVOR", "PROD_S");
+            if (string.IsNullOrWhiteSpace(mappedSchedulerCode))
+            {
+                mappedSchedulerCode = schedulerCode;
+            }
+
+            var mappedPlant = ReadMappedString(row, _fieldMap.OrderHeader.Plant, "PLANT", "WERKS", "PLAN");
+            if (string.IsNullOrWhiteSpace(mappedPlant))
+            {
+                mappedPlant = plant;
+            }
 
             results.Add(new SapOrderHeader(
                 orderNumber.Trim(),
@@ -283,15 +307,21 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var operationTable = GetTable(function, "OPERATION");
+        ValidateFieldsOnce("BAPI_PRODORD_GET_DETAIL.OPERATION", operationTable,
+            _fieldMap.Operation.Confirmation,
+            _fieldMap.Operation.OperationCode,
+            _fieldMap.Operation.StepCode,
+            _fieldMap.Operation.ConfirmableQuantity,
+            _fieldMap.Operation.WorkCenterCode);
         var results = new List<SapOperation>();
 
         foreach (var row in EnumerateRows(operationTable))
         {
-            var confirmation = GetFirstString(row, "CONF_NO", "CONFIRMATION", "RUECK");
-            var operationCode = GetFirstString(row, "OPR", "ACTIVITY", "LTXA1");
-            var stepCode = GetFirstString(row, "OPER", "VORNR", "SUB_ACTIVITY");
-            var confirmableQty = ParseInt(GetFirstString(row, "QUANTITY", "CONFIRMABLE_QTY", "BMSCH"));
-            var workCenterCode = GetFirstString(row, "WORK_CNTR", "WORKCENTER", "WORK_CENTER", "ARBPL", "STEUS");
+            var confirmation = ReadMappedString(row, _fieldMap.Operation.Confirmation, "CONFIRMATION", "RUECK");
+            var operationCode = ReadMappedString(row, _fieldMap.Operation.OperationCode, "ACTIVITY", "LTXA1");
+            var stepCode = ReadMappedString(row, _fieldMap.Operation.StepCode, "VORNR", "SUB_ACTIVITY");
+            var confirmableQty = ParseInt(ReadMappedString(row, _fieldMap.Operation.ConfirmableQuantity, "CONFIRMABLE_QTY", "BMSCH"));
+            var workCenterCode = ReadMappedString(row, _fieldMap.Operation.WorkCenterCode, "WORKCENTER", "WORK_CENTER", "ARBPL", "STEUS");
 
             if (string.IsNullOrWhiteSpace(operationCode))
             {
@@ -323,18 +353,22 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var confirmationsTable = GetTable(listFunction, "CONFIRMATIONS");
+        ValidateFieldsOnce("BAPI_PRODORDCONF_GETLIST.CONFIRMATIONS", confirmationsTable,
+            _fieldMap.Confirmation.Confirmation,
+            _fieldMap.Confirmation.ConfirmationCounter,
+            _fieldMap.Confirmation.Yield);
         var results = new List<SapConfirmation>();
 
         foreach (var row in EnumerateRows(confirmationsTable))
         {
-            var confNo = GetFirstString(row, "CONF_NO", "CONFIRMATION", "RUECK");
-            var confCounter = GetFirstString(row, "CONF_CNT", "CONFIRMATION_COUNTER", "RMZHL");
+            var confNo = ReadMappedString(row, _fieldMap.Confirmation.Confirmation, "CONFIRMATION", "RUECK");
+            var confCounter = ReadMappedString(row, _fieldMap.Confirmation.ConfirmationCounter, "CONFIRMATION_COUNTER", "RMZHL");
             if (string.IsNullOrWhiteSpace(confNo) || string.IsNullOrWhiteSpace(confCounter))
             {
                 continue;
             }
 
-            var yield = ParseInt(GetFirstString(row, "YIELD", "CONFIRMED_YIELD", "LMNGA", "CONF_QTY"));
+            var yield = ParseInt(ReadMappedString(row, _fieldMap.Confirmation.Yield, "CONFIRMED_YIELD", "LMNGA", "CONF_QTY"));
             if (yield == 0)
             {
                 var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
@@ -345,7 +379,8 @@ public sealed class SapDllSapClient : ISapClient
                 AddDetailedTiming("GetConfirmations.DetailInvoke", detailInvokeSw.ElapsedMilliseconds);
 
                 var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
-                yield = ParseInt(GetFirstString(confDetail, "YIELD", "CONFIRMED_YIELD", "LMNGA"));
+                ValidateStructureFieldsOnce("BAPI_PRODORDCONF_GETDETAIL.CONF_DETAIL", confDetail, _fieldMap.Confirmation.DetailYield);
+                yield = ParseInt(ReadMappedString(confDetail, _fieldMap.Confirmation.DetailYield, "CONFIRMED_YIELD", "LMNGA"));
             }
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
@@ -368,12 +403,15 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var componentTable = GetTable(function, "COMPONENT");
+        ValidateFieldsOnce("BAPI_PRODORD_GET_DETAIL.COMPONENT", componentTable,
+            _fieldMap.Component.Material,
+            _fieldMap.Component.Description);
         var results = new List<SapComponent>();
 
         foreach (var row in EnumerateRows(componentTable))
         {
-            var material = GetFirstString(row, "MATERIAL", "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR");
-            var description = GetFirstString(row, "MATERIAL_DESCRIPTION", "DESCRIPTION", "MAKTX", "DESCRIPTION1");
+            var material = ReadMappedString(row, _fieldMap.Component.Material, "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR");
+            var description = ReadMappedString(row, _fieldMap.Component.Description, "DESCRIPTION", "MAKTX", "DESCRIPTION1");
 
             if (string.IsNullOrWhiteSpace(material))
             {
@@ -408,11 +446,20 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var orderHeader = GetTable(function, "ORDER_HEADER");
+        ValidateFieldsOnce("BAPI_PRODORD_GET_LIST.ORDER_HEADER_BY_MATERIAL", orderHeader,
+            _fieldMap.OrderHeader.OrderNumber,
+            _fieldMap.OrderHeader.Material,
+            _fieldMap.OrderHeader.SystemStatus,
+            _fieldMap.OrderHeader.PlannedQuantity,
+            _fieldMap.OrderHeader.StartDate,
+            _fieldMap.OrderHeader.WorkCenter,
+            _fieldMap.OrderHeader.SchedulerCode,
+            _fieldMap.OrderHeader.Plant);
         var results = new List<SapOrderHeader>();
 
         foreach (var row in EnumerateRows(orderHeader))
         {
-            var orderNumber = GetFirstString(row, "ORDER_NUMBER", "AUFNR");
+            var orderNumber = ReadMappedString(row, _fieldMap.OrderHeader.OrderNumber, "AUFNR");
             if (string.IsNullOrWhiteSpace(orderNumber))
             {
                 continue;
@@ -420,13 +467,13 @@ public sealed class SapDllSapClient : ISapClient
 
             results.Add(new SapOrderHeader(
                 orderNumber.Trim(),
-                GetFirstString(row, "MATERIAL", "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR").Trim(),
-                GetFirstString(row, "SYSTEM_STATUS", "SYS_STATUS", "STAT").Trim(),
-                ParseInt(GetFirstString(row, "TARGET_QUANTITY", "TOTAL_PLORD_QTY", "GAMNG")),
-                ParseDate(GetFirstString(row, "START_DATE", "BASIC_START_DATE", "GSTRP")),
-                GetFirstString(row, "WORK_CENTER", "WORK_CENT", "ARBPL").Trim(),
-                GetFirstString(row, "PROD_SCHED", "PROD_SCHEDULER", "FEVOR").Trim(),
-                GetFirstString(row, "PRODUCTION_PLANT", "PLANT", "WERKS").Trim()));
+                ReadMappedString(row, _fieldMap.OrderHeader.Material, "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR").Trim(),
+                ReadMappedString(row, _fieldMap.OrderHeader.SystemStatus, "SYS_STATUS", "STAT").Trim(),
+                ParseInt(ReadMappedString(row, _fieldMap.OrderHeader.PlannedQuantity, "TOTAL_PLORD_QTY", "GAMNG")),
+                ParseDate(ReadMappedString(row, _fieldMap.OrderHeader.StartDate, "BASIC_START_DATE", "GSTRP")),
+                ReadMappedString(row, _fieldMap.OrderHeader.WorkCenter, "WORK_CENT", "ARBPL").Trim(),
+                ReadMappedString(row, _fieldMap.OrderHeader.SchedulerCode, "PROD_SCHEDULER", "FEVOR").Trim(),
+                ReadMappedString(row, _fieldMap.OrderHeader.Plant, "PLANT", "WERKS").Trim()));
         }
 
         AddDetailedTiming("GetProductionOrdersByMaterial.Parse", parseSw.ElapsedMilliseconds);
@@ -444,15 +491,19 @@ public sealed class SapDllSapClient : ISapClient
 
         var parseSw = Stopwatch.StartNew();
         var table = GetTable(function, "IT_AFRU");
+        ValidateFieldsOnce("ZETA_RFC_READ_AFRU.IT_AFRU", table,
+            _fieldMap.Afru.WorkCenterId,
+            _fieldMap.Afru.Yield,
+            _fieldMap.Afru.Reversed);
         var yi1 = 0;
         var yi2 = 0;
 
         foreach (var row in EnumerateRows(table))
         {
-            var arbid = GetFirstString(row, "ARBID", "WORK_CENTER_ID");
+            var arbid = ReadMappedString(row, _fieldMap.Afru.WorkCenterId, "WORK_CENTER_ID");
             if (string.IsNullOrWhiteSpace(arbid))
             {
-                arbid = GetStringByIndex(row, 9);
+                arbid = GetStringByIndex(row, _fieldMap.Afru.WorkCenterIdFallbackIndex);
             }
 
             var arbidNum = DigitsOnly(arbid);
@@ -461,17 +512,17 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var yieString = GetFirstString(row, "YIELD", "LMNGA");
+            var yieString = ReadMappedString(row, _fieldMap.Afru.Yield, "LMNGA");
             if (string.IsNullOrWhiteSpace(yieString))
             {
-                yieString = GetStringByIndex(row, 38);
+                yieString = GetStringByIndex(row, _fieldMap.Afru.YieldFallbackIndex);
             }
 
             var yie = ParseInt(yieString);
-            var reversed = GetFirstString(row, "REVERSED", "STOKZ");
+            var reversed = ReadMappedString(row, _fieldMap.Afru.Reversed, "STOKZ");
             if (string.IsNullOrWhiteSpace(reversed))
             {
-                reversed = GetStringByIndex(row, 95);
+                reversed = GetStringByIndex(row, _fieldMap.Afru.ReversedFallbackIndex);
             }
 
             if (string.Equals(reversed, "X", StringComparison.OrdinalIgnoreCase))
@@ -948,6 +999,93 @@ public sealed class SapDllSapClient : ISapClient
         var setValue = SetValueNameObjectCache.GetOrAdd(row.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }))
                        ?? throw new InvalidOperationException("Could not find row.SetValue(string, object).");
         setValue.Invoke(row, new object[] { fieldName, value });
+    }
+
+    private string ReadMappedString(object row, string primaryFieldName, params string[] fallbackFieldNames)
+    {
+        if (!string.IsNullOrWhiteSpace(primaryFieldName))
+        {
+            var value = GetString(row, primaryFieldName);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        if (!_allowFallbackFieldAliases)
+        {
+            return string.Empty;
+        }
+
+        return GetFirstString(row, fallbackFieldNames);
+    }
+
+    private void ValidateFieldsOnce(string scope, object table, params string[] fieldNames)
+    {
+        if (!_strictFieldValidation)
+        {
+            return;
+        }
+
+        if (!_validatedFieldScopes.TryAdd(scope, true))
+        {
+            return;
+        }
+
+        foreach (var row in EnumerateRows(table))
+        {
+            ValidateFieldsOnRow(scope, row, fieldNames);
+            return;
+        }
+    }
+
+    private void ValidateStructureFieldsOnce(string scope, object structure, params string[] fieldNames)
+    {
+        if (!_strictFieldValidation)
+        {
+            return;
+        }
+
+        if (!_validatedFieldScopes.TryAdd(scope, true))
+        {
+            return;
+        }
+
+        ValidateFieldsOnRow(scope, structure, fieldNames);
+    }
+
+    private static void ValidateFieldsOnRow(string scope, object rowOrStructure, params string[] fieldNames)
+    {
+        foreach (var fieldName in fieldNames)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName))
+            {
+                continue;
+            }
+
+            if (!CanReadField(rowOrStructure, fieldName))
+            {
+                throw new InvalidOperationException($"Strict SAP field validation failed for {scope}: field '{fieldName}' is not readable.");
+            }
+        }
+    }
+
+    private static bool CanReadField(object rowOrStructure, string fieldName)
+    {
+        var rowType = rowOrStructure.GetType();
+        var cache = RowAccessorCache.GetOrAdd(rowType, CreateRowAccessorCacheItem);
+
+        if (TryInvokeStringAccessor(rowOrStructure, cache.GetStringByName, fieldName, out _))
+        {
+            return true;
+        }
+
+        if (TryInvokeStringAccessor(rowOrStructure, cache.GetValueByName, fieldName, out _))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static string GetFirstString(object row, params string[] fieldNames)
