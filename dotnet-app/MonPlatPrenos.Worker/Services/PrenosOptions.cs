@@ -36,6 +36,63 @@ public sealed class SapIntegrationOptions
     public string? Router { get; set; }
     public string? SapLoginConnectionString { get; set; }
     public int? SapLoginIdent { get; set; }
+    public bool StrictFieldValidation { get; set; } = false;
+    public bool AllowFallbackFieldAliases { get; set; } = true;
+    public SapFieldMapOptions FieldMap { get; set; } = new SapFieldMapOptions();
+}
+
+public sealed class SapFieldMapOptions
+{
+    public OrderHeaderFieldMap OrderHeader { get; set; } = new OrderHeaderFieldMap();
+    public OperationFieldMap Operation { get; set; } = new OperationFieldMap();
+    public ComponentFieldMap Component { get; set; } = new ComponentFieldMap();
+    public ConfirmationFieldMap Confirmation { get; set; } = new ConfirmationFieldMap();
+    public AfruFieldMap Afru { get; set; } = new AfruFieldMap();
+}
+
+public sealed class OrderHeaderFieldMap
+{
+    public string OrderNumber { get; set; } = "AUFNR";
+    public string Material { get; set; } = "CO_MATNR18";
+    public string SystemStatus { get; set; } = "CO_STTXT";
+    public string PlannedQuantity { get; set; } = "GAMNG";
+    public string StartDate { get; set; } = "CO_GSTRP";
+    public string SchedulerCode { get; set; } = "FEVOR";
+    public string Plant { get; set; } = "WERKS_D";
+    public string WorkCenter { get; set; } = "ARBPL";
+}
+
+public sealed class OperationFieldMap
+{
+    public string Confirmation { get; set; } = "CONF_NO";
+    public string OperationCode { get; set; } = "OPR";
+    public string StepCode { get; set; } = "OPER";
+    public string ConfirmableQuantity { get; set; } = "QUANTITY";
+    public string WorkCenterCode { get; set; } = "WORK_CNTR";
+}
+
+public sealed class ComponentFieldMap
+{
+    public string Material { get; set; } = "CO_MATNR18";
+    public string Description { get; set; } = "MATERIAL_DESCRIPTION";
+}
+
+public sealed class ConfirmationFieldMap
+{
+    public string Confirmation { get; set; } = "CONF_NO";
+    public string ConfirmationCounter { get; set; } = "CONF_CNT";
+    public string Yield { get; set; } = "YIELD";
+    public string DetailYield { get; set; } = "YIELD";
+}
+
+public sealed class AfruFieldMap
+{
+    public string WorkCenterId { get; set; } = "ARBID";
+    public string Yield { get; set; } = "YIELD";
+    public string Reversed { get; set; } = "REVERSED";
+    public int WorkCenterIdFallbackIndex { get; set; } = 9;
+    public int YieldFallbackIndex { get; set; } = 38;
+    public int ReversedFallbackIndex { get; set; } = 95;
 }
 
 public sealed class TermRule

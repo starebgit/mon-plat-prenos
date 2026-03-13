@@ -328,3 +328,8 @@ Useful daily checks in the legacy DB are based on `plosce.danstart` (orders per 
 
 
 If you still see very verbose host lines (Roslyn/corehost), that output usually comes from environment variables like `COREHOST_TRACE` set in your shell, not from app logging.
+
+## RFC field mapping input (required for no-guess mode)
+
+Use `rfc-field-lockdown-plan.md` to provide exact SAP technical field names for every RFC output we read.
+
