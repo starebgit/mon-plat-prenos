@@ -36,8 +36,6 @@ public sealed class SapIntegrationOptions
     public string? Router { get; set; }
     public string? SapLoginConnectionString { get; set; }
     public int? SapLoginIdent { get; set; }
-    public bool StrictFieldValidation { get; set; } = false;
-    public bool AllowFallbackFieldAliases { get; set; } = true;
     public SapFieldMapOptions FieldMap { get; set; } = new SapFieldMapOptions();
 }
 
@@ -90,9 +88,6 @@ public sealed class AfruFieldMap
     public string WorkCenterId { get; set; } = "ARBID";
     public string Yield { get; set; } = "YIELD";
     public string Reversed { get; set; } = "REVERSED";
-    public int WorkCenterIdFallbackIndex { get; set; } = 9;
-    public int YieldFallbackIndex { get; set; } = 38;
-    public int ReversedFallbackIndex { get; set; } = 95;
 }
 
 public sealed class TermRule

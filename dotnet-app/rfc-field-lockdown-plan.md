@@ -10,9 +10,8 @@ This plan removes runtime field guessing from the worker and replaces it with ex
 ## Change list
 1. Add field-map config to `Prenos:Sap:FieldMap` (one field per value).
 2. Replace fallback reads in `SapDllSapClient` with exact reads from `FieldMap`.
-3. Add `Prenos:Sap:StrictFieldValidation` (default `true` in production).
-4. Validate configured fields once per RFC output table/structure and cache success.
-5. Keep a temporary compatibility mode (fallback aliases) only behind `Prenos:Sap:AllowFallbackFieldAliases=false`.
+3. Validate configured fields once per RFC output table/structure and cache success (always-on strict mode).
+4. Remove all alias-fallback parsing from hot paths.
 
 ## Required field names from your SAP system
 
@@ -115,6 +114,6 @@ ZETA_RFC_READ_AFRU
 > Important: use **Component name** (left column), not **Component Type/Data element** (e.g., `AUFNR`, `CO_MATNR18`).
 
 ## Definition of done
-- Worker runs with `StrictFieldValidation=true` and `AllowFallbackFieldAliases=false`.
-- No `GetFirstString` alias lists in hot loops.
+- Worker runs with strict validation always enabled.
+- No alias-fallback reads in hot loops.
 - Timing report shows lower parse overhead and fewer exception/fallback probes.

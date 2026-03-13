@@ -37,8 +37,6 @@ public sealed class SapDllSapClient : ISapClient
     private readonly Assembly _sapUtilsAssembly;
     private readonly SapIntegrationOptions _options;
     private readonly SapFieldMapOptions _fieldMap;
-    private readonly bool _strictFieldValidation;
-    private readonly bool _allowFallbackFieldAliases;
     private readonly object _destinationLock = new object();
     private object? _cachedDestination;
     private object? _cachedRepository;
@@ -60,20 +58,10 @@ public sealed class SapDllSapClient : ISapClient
     {
         public MethodInfo? GetStringByName;
         public MethodInfo? GetValueByName;
-        public MethodInfo? GetStringByIndex;
-        public MethodInfo? GetValueByIndex;
         public readonly ConcurrentDictionary<string, NameAccessorKind> NameAccessorKinds = new(StringComparer.Ordinal);
-        public readonly ConcurrentDictionary<int, IndexAccessorKind> IndexAccessorKinds = new();
     }
 
     private enum NameAccessorKind
-    {
-        None = 0,
-        GetString = 1,
-        GetValue = 2
-    }
-
-    private enum IndexAccessorKind
     {
         None = 0,
         GetString = 1,
@@ -99,8 +87,6 @@ public sealed class SapDllSapClient : ISapClient
     {
         _options = options;
         _fieldMap = options.FieldMap ?? new SapFieldMapOptions();
-        _strictFieldValidation = options.StrictFieldValidation;
-        _allowFallbackFieldAliases = options.AllowFallbackFieldAliases;
         _sapDllFullPath = ResolveSapPath(options.SapDllPath, "sapnco.dll");
         _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath, "sapnco_utils.dll");
 
@@ -361,14 +347,14 @@ public sealed class SapDllSapClient : ISapClient
 
         foreach (var row in EnumerateRows(confirmationsTable))
         {
-            var confNo = ReadMappedString(row, _fieldMap.Confirmation.Confirmation, "CONFIRMATION", "RUECK");
-            var confCounter = ReadMappedString(row, _fieldMap.Confirmation.ConfirmationCounter, "CONFIRMATION_COUNTER", "RMZHL");
+            var confNo = GetString(row, _fieldMap.Confirmation.Confirmation);
+            var confCounter = GetString(row, _fieldMap.Confirmation.ConfirmationCounter);
             if (string.IsNullOrWhiteSpace(confNo) || string.IsNullOrWhiteSpace(confCounter))
             {
                 continue;
             }
 
-            var yield = ParseInt(ReadMappedString(row, _fieldMap.Confirmation.Yield, "CONFIRMED_YIELD", "LMNGA", "CONF_QTY"));
+            var yield = ParseInt(GetString(row, _fieldMap.Confirmation.Yield));
             if (yield == 0)
             {
                 var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
@@ -380,7 +366,7 @@ public sealed class SapDllSapClient : ISapClient
 
                 var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
                 ValidateStructureFieldsOnce("BAPI_PRODORDCONF_GETDETAIL.CONF_DETAIL", confDetail, _fieldMap.Confirmation.DetailYield);
-                yield = ParseInt(ReadMappedString(confDetail, _fieldMap.Confirmation.DetailYield, "CONFIRMED_YIELD", "LMNGA"));
+                yield = ParseInt(GetString(confDetail, _fieldMap.Confirmation.DetailYield));
             }
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
@@ -500,11 +486,7 @@ public sealed class SapDllSapClient : ISapClient
 
         foreach (var row in EnumerateRows(table))
         {
-            var arbid = ReadMappedString(row, _fieldMap.Afru.WorkCenterId, "WORK_CENTER_ID");
-            if (string.IsNullOrWhiteSpace(arbid))
-            {
-                arbid = GetStringByIndex(row, _fieldMap.Afru.WorkCenterIdFallbackIndex);
-            }
+            var arbid = GetString(row, _fieldMap.Afru.WorkCenterId);
 
             var arbidNum = DigitsOnly(arbid);
             if (arbidNum < 10004712 || arbidNum > 10004720)
@@ -512,18 +494,10 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var yieString = ReadMappedString(row, _fieldMap.Afru.Yield, "LMNGA");
-            if (string.IsNullOrWhiteSpace(yieString))
-            {
-                yieString = GetStringByIndex(row, _fieldMap.Afru.YieldFallbackIndex);
-            }
+            var yieString = GetString(row, _fieldMap.Afru.Yield);
 
             var yie = ParseInt(yieString);
-            var reversed = ReadMappedString(row, _fieldMap.Afru.Reversed, "STOKZ");
-            if (string.IsNullOrWhiteSpace(reversed))
-            {
-                reversed = GetStringByIndex(row, _fieldMap.Afru.ReversedFallbackIndex);
-            }
+            var reversed = GetString(row, _fieldMap.Afru.Reversed);
 
             if (string.Equals(reversed, "X", StringComparison.OrdinalIgnoreCase))
             {
@@ -1001,32 +975,8 @@ public sealed class SapDllSapClient : ISapClient
         setValue.Invoke(row, new object[] { fieldName, value });
     }
 
-    private string ReadMappedString(object row, string primaryFieldName, params string[] fallbackFieldNames)
-    {
-        if (!string.IsNullOrWhiteSpace(primaryFieldName))
-        {
-            var value = GetString(row, primaryFieldName);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        if (!_allowFallbackFieldAliases)
-        {
-            return string.Empty;
-        }
-
-        return GetFirstString(row, fallbackFieldNames);
-    }
-
     private void ValidateFieldsOnce(string scope, object table, params string[] fieldNames)
     {
-        if (!_strictFieldValidation)
-        {
-            return;
-        }
-
         if (!_validatedFieldScopes.TryAdd(scope, true))
         {
             return;
@@ -1041,11 +991,6 @@ public sealed class SapDllSapClient : ISapClient
 
     private void ValidateStructureFieldsOnce(string scope, object structure, params string[] fieldNames)
     {
-        if (!_strictFieldValidation)
-        {
-            return;
-        }
-
         if (!_validatedFieldScopes.TryAdd(scope, true))
         {
             return;
@@ -1086,20 +1031,6 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         return false;
-    }
-
-    private static string GetFirstString(object row, params string[] fieldNames)
-    {
-        foreach (var fieldName in fieldNames)
-        {
-            var value = GetString(row, fieldName);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        return string.Empty;
     }
 
     private static string GetString(object row, string fieldName)
@@ -1152,60 +1083,12 @@ public sealed class SapDllSapClient : ISapClient
         return string.Empty;
     }
 
-
-    private static string GetStringByIndex(object row, int index)
-    {
-        var rowType = row.GetType();
-        var cache = RowAccessorCache.GetOrAdd(rowType, CreateRowAccessorCacheItem);
-        var kind = cache.IndexAccessorKinds.GetOrAdd(index, _ => IndexAccessorKind.None);
-
-        if (kind == IndexAccessorKind.GetString)
-        {
-            if (TryInvokeStringAccessor(row, cache.GetStringByIndex, index, out var value))
-            {
-                return value;
-            }
-
-            cache.IndexAccessorKinds[index] = IndexAccessorKind.None;
-            return string.Empty;
-        }
-
-        if (kind == IndexAccessorKind.GetValue)
-        {
-            if (TryInvokeStringAccessor(row, cache.GetValueByIndex, index, out var value))
-            {
-                return value;
-            }
-
-            cache.IndexAccessorKinds[index] = IndexAccessorKind.None;
-            return string.Empty;
-        }
-
-        if (TryInvokeStringAccessor(row, cache.GetStringByIndex, index, out var getStringValue))
-        {
-            cache.IndexAccessorKinds[index] = IndexAccessorKind.GetString;
-            return getStringValue;
-        }
-
-        if (TryInvokeStringAccessor(row, cache.GetValueByIndex, index, out var getValueResult))
-        {
-            cache.IndexAccessorKinds[index] = IndexAccessorKind.GetValue;
-            return getValueResult;
-        }
-
-        cache.IndexAccessorKinds[index] = IndexAccessorKind.None;
-
-        return string.Empty;
-    }
-
     private static RowAccessorCacheItem CreateRowAccessorCacheItem(Type rowType)
     {
         return new RowAccessorCacheItem
         {
             GetStringByName = rowType.GetMethod("GetString", new[] { typeof(string) }),
-            GetValueByName = rowType.GetMethod("GetValue", new[] { typeof(string) }),
-            GetStringByIndex = rowType.GetMethod("GetString", new[] { typeof(int) }),
-            GetValueByIndex = rowType.GetMethod("GetValue", new[] { typeof(int) })
+            GetValueByName = rowType.GetMethod("GetValue", new[] { typeof(string) })
         };
     }
 
@@ -1220,26 +1103,6 @@ public sealed class SapDllSapClient : ISapClient
         try
         {
             value = Convert.ToString(accessor.Invoke(target, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
-            return true;
-        }
-        catch (TargetInvocationException)
-        {
-            value = string.Empty;
-            return false;
-        }
-    }
-
-    private static bool TryInvokeStringAccessor(object target, MethodInfo? accessor, int index, out string value)
-    {
-        if (accessor is null)
-        {
-            value = string.Empty;
-            return false;
-        }
-
-        try
-        {
-            value = Convert.ToString(accessor.Invoke(target, new object[] { index }), CultureInfo.InvariantCulture) ?? string.Empty;
             return true;
         }
         catch (TargetInvocationException)
