@@ -237,7 +237,6 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.OrderHeader.SystemStatus,
             _fieldMap.OrderHeader.PlannedQuantity,
             _fieldMap.OrderHeader.StartDate,
-            _fieldMap.OrderHeader.SchedulerCode,
             _fieldMap.OrderHeader.Plant);
         var results = new List<SapOrderHeader>();
 
@@ -253,11 +252,7 @@ public sealed class SapDllSapClient : ISapClient
             var status = GetString(row, _fieldMap.OrderHeader.SystemStatus);
             var plannedQuantity = ParseInt(GetString(row, _fieldMap.OrderHeader.PlannedQuantity));
             var startDate = ParseDate(GetString(row, _fieldMap.OrderHeader.StartDate));
-            var mappedSchedulerCode = GetString(row, _fieldMap.OrderHeader.SchedulerCode);
-            if (string.IsNullOrWhiteSpace(mappedSchedulerCode))
-            {
-                mappedSchedulerCode = schedulerCode;
-            }
+            var mappedSchedulerCode = schedulerCode;
 
             var mappedPlant = GetString(row, _fieldMap.OrderHeader.Plant);
             if (string.IsNullOrWhiteSpace(mappedPlant))
@@ -439,7 +434,6 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.OrderHeader.PlannedQuantity,
             _fieldMap.OrderHeader.StartDate,
             _fieldMap.OrderHeader.WorkCenter,
-            _fieldMap.OrderHeader.SchedulerCode,
             _fieldMap.OrderHeader.Plant);
         var results = new List<SapOrderHeader>();
 
