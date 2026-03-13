@@ -257,23 +257,23 @@ public sealed class SapDllSapClient : ISapClient
 
         foreach (var row in EnumerateRows(orderHeader))
         {
-            var orderNumber = ReadMappedString(row, _fieldMap.OrderHeader.OrderNumber, "AUFNR");
+            var orderNumber = GetString(row, _fieldMap.OrderHeader.OrderNumber);
             if (string.IsNullOrWhiteSpace(orderNumber))
             {
                 continue;
             }
 
-            var material = ReadMappedString(row, _fieldMap.OrderHeader.Material, "MATERIAL_EXTERNAL", "MATERIAL_LONG", "MATNR");
-            var status = ReadMappedString(row, _fieldMap.OrderHeader.SystemStatus, "SYS_STATUS", "STAT");
-            var plannedQuantity = ParseInt(ReadMappedString(row, _fieldMap.OrderHeader.PlannedQuantity, "TOTAL_PLORD_QTY", "GAMNG"));
-            var startDate = ParseDate(ReadMappedString(row, _fieldMap.OrderHeader.StartDate, "BASIC_START_DATE", "GSTRP"));
-            var mappedSchedulerCode = ReadMappedString(row, _fieldMap.OrderHeader.SchedulerCode, "PROD_SCHEDULER", "FEVOR", "PROD_S");
+            var material = GetString(row, _fieldMap.OrderHeader.Material);
+            var status = GetString(row, _fieldMap.OrderHeader.SystemStatus);
+            var plannedQuantity = ParseInt(GetString(row, _fieldMap.OrderHeader.PlannedQuantity));
+            var startDate = ParseDate(GetString(row, _fieldMap.OrderHeader.StartDate));
+            var mappedSchedulerCode = GetString(row, _fieldMap.OrderHeader.SchedulerCode);
             if (string.IsNullOrWhiteSpace(mappedSchedulerCode))
             {
                 mappedSchedulerCode = schedulerCode;
             }
 
-            var mappedPlant = ReadMappedString(row, _fieldMap.OrderHeader.Plant, "PLANT", "WERKS", "PLAN");
+            var mappedPlant = GetString(row, _fieldMap.OrderHeader.Plant);
             if (string.IsNullOrWhiteSpace(mappedPlant))
             {
                 mappedPlant = plant;
@@ -459,7 +459,7 @@ public sealed class SapDllSapClient : ISapClient
 
         foreach (var row in EnumerateRows(orderHeader))
         {
-            var orderNumber = ReadMappedString(row, _fieldMap.OrderHeader.OrderNumber, "AUFNR");
+            var orderNumber = GetString(row, _fieldMap.OrderHeader.OrderNumber);
             if (string.IsNullOrWhiteSpace(orderNumber))
             {
                 continue;
@@ -467,13 +467,13 @@ public sealed class SapDllSapClient : ISapClient
 
             results.Add(new SapOrderHeader(
                 orderNumber.Trim(),
-                ReadMappedString(row, _fieldMap.OrderHeader.Material, "MATERIAL_LONG", "MATERIAL_EXTERNAL", "MATNR").Trim(),
-                ReadMappedString(row, _fieldMap.OrderHeader.SystemStatus, "SYS_STATUS", "STAT").Trim(),
-                ParseInt(ReadMappedString(row, _fieldMap.OrderHeader.PlannedQuantity, "TOTAL_PLORD_QTY", "GAMNG")),
-                ParseDate(ReadMappedString(row, _fieldMap.OrderHeader.StartDate, "BASIC_START_DATE", "GSTRP")),
-                ReadMappedString(row, _fieldMap.OrderHeader.WorkCenter, "WORK_CENT", "ARBPL").Trim(),
-                ReadMappedString(row, _fieldMap.OrderHeader.SchedulerCode, "PROD_SCHEDULER", "FEVOR").Trim(),
-                ReadMappedString(row, _fieldMap.OrderHeader.Plant, "PLANT", "WERKS").Trim()));
+                GetString(row, _fieldMap.OrderHeader.Material).Trim(),
+                GetString(row, _fieldMap.OrderHeader.SystemStatus).Trim(),
+                ParseInt(GetString(row, _fieldMap.OrderHeader.PlannedQuantity)),
+                ParseDate(GetString(row, _fieldMap.OrderHeader.StartDate)),
+                GetString(row, _fieldMap.OrderHeader.WorkCenter).Trim(),
+                GetString(row, _fieldMap.OrderHeader.SchedulerCode).Trim(),
+                GetString(row, _fieldMap.OrderHeader.Plant).Trim()));
         }
 
         AddDetailedTiming("GetProductionOrdersByMaterial.Parse", parseSw.ElapsedMilliseconds);

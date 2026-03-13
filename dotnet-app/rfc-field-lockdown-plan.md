@@ -100,6 +100,18 @@ ZETA_RFC_READ_AFRU
 - Yield2 = 
 ```
 
+## Confirmed from your screenshots (already applied in code)
+
+### `BAPI_PRODORD_GET_LIST` -> `ORDER_HEADER`
+- OrderNumber = `AUFNR`
+- Material = `CO_MATNR18`
+- SystemStatus = `CO_STTXT`
+- PlannedQuantity = `GAMNG`
+- StartDate = `CO_GSTRP`
+- SchedulerCode = `FEVOR`
+- Plant = `WERKS_D`
+- WorkCenter = `ARBPL`
+
 ## Definition of done
 - Worker runs with `StrictFieldValidation=true` and `AllowFallbackFieldAliases=false`.
 - No `GetFirstString` alias lists in hot loops.
