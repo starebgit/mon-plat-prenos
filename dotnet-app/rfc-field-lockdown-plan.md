@@ -103,14 +103,16 @@ ZETA_RFC_READ_AFRU
 ## Confirmed from your screenshots (already applied in code)
 
 ### `BAPI_PRODORD_GET_LIST` -> `ORDER_HEADER`
-- OrderNumber = `AUFNR`
-- Material = `CO_MATNR18`
-- SystemStatus = `CO_STTXT`
-- PlannedQuantity = `GAMNG`
-- StartDate = `CO_GSTRP`
-- SchedulerCode = `FEVOR`
-- Plant = `WERKS_D`
-- WorkCenter = `ARBPL`
+- OrderNumber = `ORDER_NUMBER`
+- Material = `MATERIAL`
+- SystemStatus = `SYSTEM_STATUS`
+- PlannedQuantity = `TARGET_QUANTITY`
+- StartDate = `START_DATE`
+- SchedulerCode = `PROD_SCHED`
+- Plant = `PRODUCTION_PLANT`
+- WorkCenter = `WORK_CENTER`
+
+> Important: use **Component name** (left column), not **Component Type/Data element** (e.g., `AUFNR`, `CO_MATNR18`).
 
 ## Definition of done
 - Worker runs with `StrictFieldValidation=true` and `AllowFallbackFieldAliases=false`.

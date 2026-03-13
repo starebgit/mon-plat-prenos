@@ -52,14 +52,14 @@ public sealed class SapFieldMapOptions
 
 public sealed class OrderHeaderFieldMap
 {
-    public string OrderNumber { get; set; } = "AUFNR";
-    public string Material { get; set; } = "CO_MATNR18";
-    public string SystemStatus { get; set; } = "CO_STTXT";
-    public string PlannedQuantity { get; set; } = "GAMNG";
-    public string StartDate { get; set; } = "CO_GSTRP";
-    public string SchedulerCode { get; set; } = "FEVOR";
-    public string Plant { get; set; } = "WERKS_D";
-    public string WorkCenter { get; set; } = "ARBPL";
+    public string OrderNumber { get; set; } = "ORDER_NUMBER";
+    public string Material { get; set; } = "MATERIAL";
+    public string SystemStatus { get; set; } = "SYSTEM_STATUS";
+    public string PlannedQuantity { get; set; } = "TARGET_QUANTITY";
+    public string StartDate { get; set; } = "START_DATE";
+    public string SchedulerCode { get; set; } = "PROD_SCHED";
+    public string Plant { get; set; } = "PRODUCTION_PLANT";
+    public string WorkCenter { get; set; } = "WORK_CENTER";
 }
 
 public sealed class OperationFieldMap
@@ -73,7 +73,7 @@ public sealed class OperationFieldMap
 
 public sealed class ComponentFieldMap
 {
-    public string Material { get; set; } = "CO_MATNR18";
+    public string Material { get; set; } = "MATERIAL";
     public string Description { get; set; } = "MATERIAL_DESCRIPTION";
 }
 
