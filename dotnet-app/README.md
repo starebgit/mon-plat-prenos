@@ -93,7 +93,7 @@ So "filtering by operations" means "use only selected operation types as the sou
 
 ## Connect to real SAP
 
-Right now `MockSapClient` provides local test data.
+The worker uses `SapDllSapClient` for SAP access.
 
 ### Using `sapnco.dll` and `sapnco_utils.dll`
 
@@ -110,7 +110,6 @@ dotnet-app/MonPlatPrenos.Worker/lib/sapnco_utils.dll
 
 ```json
 "Sap": {
-  "UseMock": false,
   "SapDllPath": "lib/sapnco.dll",
   "SaUtilsDllPath": "lib/sapnco_utils.dll"
 }
@@ -166,7 +165,6 @@ The worker now uses Delphi-style direct connection fields from `Prenos:Sap` (or 
 
 ```json
 "Sap": {
-  "UseMock": false,
   "DestinationName": "",
   "AppServerHost": "your-sap-host",
   "SystemNumber": "00",
@@ -272,10 +270,9 @@ For the machine that runs the worker:
 Run these checks as migration gates:
 
 1. `Debug|x64` and `Release|x64` build pass.
-2. `--run-once` with mock SAP passes.
-3. `--run-once` with real SAP reaches destination creation without loader exceptions.
-4. One-day replay (`--from-date`) produces expected output files.
-5. Scheduled mode starts and logs next-run behavior correctly.
+2. `--run-once` reaches destination creation without loader exceptions.
+3. One-day replay (`--from-date`) produces expected output files.
+4. Scheduled mode starts and logs next-run behavior correctly.
 
 ### 7) Rollout strategy
 
@@ -332,4 +329,3 @@ If you still see very verbose host lines (Roslyn/corehost), that output usually 
 ## RFC field mapping input (required for no-guess mode)
 
 Use `rfc-field-lockdown-plan.md` to provide exact SAP technical field names for every RFC output we read.
-
