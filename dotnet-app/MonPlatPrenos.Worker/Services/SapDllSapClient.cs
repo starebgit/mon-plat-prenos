@@ -234,42 +234,13 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.OrderHeader.PlannedQuantity,
             _fieldMap.OrderHeader.StartDate,
             _fieldMap.OrderHeader.Plant);
-        var results = new List<SapOrderHeader>();
-
-        foreach (var row in EnumerateRows(orderHeader))
-        {
-            var orderNumber = GetString(row, _fieldMap.OrderHeader.OrderNumber);
-            if (string.IsNullOrWhiteSpace(orderNumber))
-            {
-                continue;
-            }
-
-            var material = GetString(row, _fieldMap.OrderHeader.Material);
-            var status = GetString(row, _fieldMap.OrderHeader.SystemStatus);
-            var plannedQuantity = ParseInt(GetString(row, _fieldMap.OrderHeader.PlannedQuantity));
-            var startDate = ParseDate(GetString(row, _fieldMap.OrderHeader.StartDate));
-            var mappedSchedulerCode = schedulerCode;
-
-            var mappedPlant = GetString(row, _fieldMap.OrderHeader.Plant);
-            if (string.IsNullOrWhiteSpace(mappedPlant))
-            {
-                mappedPlant = plant;
-            }
-
-            results.Add(new SapOrderHeader(
-                orderNumber.Trim(),
-                material.Trim(),
-                status.Trim(),
-                plannedQuantity,
-                startDate,
-                string.Empty,
-                mappedSchedulerCode.Trim(),
-                mappedPlant.Trim()));
-        }
+        IReadOnlyList<SapOrderHeader> results = _options.UseTypedHotPath
+            ? ParsePlateOrderHeadersFast(orderHeader, plant, schedulerCode)
+            : ParsePlateOrderHeadersReflection(orderHeader, plant, schedulerCode);
 
 
         AddDetailedTiming("GetProductionOrdersForPlates.Parse", parseSw.ElapsedMilliseconds);
-        return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
+        return Task.FromResult(results);
     }
 
     public Task<IReadOnlyList<SapOperation>> GetOperationsAsync(string orderNumber, CancellationToken cancellationToken)
@@ -372,6 +343,121 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.OrderHeader.StartDate,
             _fieldMap.OrderHeader.WorkCenter,
             _fieldMap.OrderHeader.Plant);
+        IReadOnlyList<SapOrderHeader> results = _options.UseTypedHotPath
+            ? ParseOrderHeadersByMaterialFast(orderHeader)
+            : ParseOrderHeadersByMaterialReflection(orderHeader);
+
+        AddDetailedTiming("GetProductionOrdersByMaterial.Parse", parseSw.ElapsedMilliseconds);
+        return Task.FromResult(results);
+    }
+
+    public Task<int> GetAfruYieldDeltaAsync(string orderNumber, DateTime fromDate, CancellationToken cancellationToken)
+    {
+        var function = CreateFunction("ZETA_RFC_READ_AFRU");
+        SetImport(function, "dday", fromDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+        SetImport(function, "stnal", orderNumber);
+        var invokeSw = Stopwatch.StartNew();
+        InvokeFunction(function);
+        AddDetailedTiming("GetAfruYieldDelta.Invoke", invokeSw.ElapsedMilliseconds);
+
+        var parseSw = Stopwatch.StartNew();
+        var table = GetTable(function, "IT_AFRU");
+        ValidateFieldsOnce("ZETA_RFC_READ_AFRU.IT_AFRU", table,
+            _fieldMap.Afru.WorkCenterId,
+            _fieldMap.Afru.Yield,
+            _fieldMap.Afru.Reversed);
+        var (yi1, yi2) = _options.UseTypedHotPath
+            ? ParseAfruYieldBucketsFast(table)
+            : ParseAfruYieldBucketsReflection(table);
+
+        AddDetailedTiming("GetAfruYieldDelta.Parse", parseSw.ElapsedMilliseconds);
+        return Task.FromResult(yi1 - yi2);
+    }
+
+    private IReadOnlyList<SapOrderHeader> ParsePlateOrderHeadersReflection(object orderHeader, string defaultPlant, string schedulerCode)
+    {
+        var results = new List<SapOrderHeader>();
+        foreach (var row in EnumerateRows(orderHeader))
+        {
+            var orderNumber = GetString(row, _fieldMap.OrderHeader.OrderNumber);
+            if (string.IsNullOrWhiteSpace(orderNumber))
+            {
+                continue;
+            }
+
+            var mappedPlant = GetString(row, _fieldMap.OrderHeader.Plant);
+            if (string.IsNullOrWhiteSpace(mappedPlant))
+            {
+                mappedPlant = defaultPlant;
+            }
+
+            results.Add(new SapOrderHeader(
+                orderNumber.Trim(),
+                GetString(row, _fieldMap.OrderHeader.Material).Trim(),
+                GetString(row, _fieldMap.OrderHeader.SystemStatus).Trim(),
+                ParseInt(GetString(row, _fieldMap.OrderHeader.PlannedQuantity)),
+                ParseDate(GetString(row, _fieldMap.OrderHeader.StartDate)),
+                string.Empty,
+                schedulerCode.Trim(),
+                mappedPlant.Trim()));
+        }
+
+        return results;
+    }
+
+    private IReadOnlyList<SapOrderHeader> ParsePlateOrderHeadersFast(object orderHeader, string defaultPlant, string schedulerCode)
+    {
+        var (count, rowGetter) = GetFastTableAccessors(orderHeader);
+        if (count == 0)
+        {
+            return Array.Empty<SapOrderHeader>();
+        }
+
+        var firstRow = rowGetter(orderHeader, 0);
+        if (firstRow is null)
+        {
+            return ParsePlateOrderHeadersReflection(orderHeader, defaultPlant, schedulerCode);
+        }
+
+        var getField = GetFastRowStringAccessor(firstRow.GetType());
+        var results = new List<SapOrderHeader>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var row = rowGetter(orderHeader, i);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var orderNumber = SafeGetFastField(getField, row, _fieldMap.OrderHeader.OrderNumber);
+            if (string.IsNullOrWhiteSpace(orderNumber))
+            {
+                continue;
+            }
+
+            var mappedPlant = SafeGetFastField(getField, row, _fieldMap.OrderHeader.Plant);
+            if (string.IsNullOrWhiteSpace(mappedPlant))
+            {
+                mappedPlant = defaultPlant;
+            }
+
+            results.Add(new SapOrderHeader(
+                orderNumber.Trim(),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.Material).Trim(),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.SystemStatus).Trim(),
+                ParseInt(SafeGetFastField(getField, row, _fieldMap.OrderHeader.PlannedQuantity)),
+                ParseDate(SafeGetFastField(getField, row, _fieldMap.OrderHeader.StartDate)),
+                string.Empty,
+                schedulerCode.Trim(),
+                mappedPlant.Trim()));
+        }
+
+        return results;
+    }
+
+    private IReadOnlyList<SapOrderHeader> ParseOrderHeadersByMaterialReflection(object orderHeader)
+    {
         var results = new List<SapOrderHeader>();
 
         foreach (var row in EnumerateRows(orderHeader))
@@ -393,44 +479,69 @@ public sealed class SapDllSapClient : ISapClient
                 GetString(row, _fieldMap.OrderHeader.Plant).Trim()));
         }
 
-        AddDetailedTiming("GetProductionOrdersByMaterial.Parse", parseSw.ElapsedMilliseconds);
-        return Task.FromResult<IReadOnlyList<SapOrderHeader>>(results);
+        return results;
     }
 
-    public Task<int> GetAfruYieldDeltaAsync(string orderNumber, DateTime fromDate, CancellationToken cancellationToken)
+    private IReadOnlyList<SapOrderHeader> ParseOrderHeadersByMaterialFast(object orderHeader)
     {
-        var function = CreateFunction("ZETA_RFC_READ_AFRU");
-        SetImport(function, "dday", fromDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
-        SetImport(function, "stnal", orderNumber);
-        var invokeSw = Stopwatch.StartNew();
-        InvokeFunction(function);
-        AddDetailedTiming("GetAfruYieldDelta.Invoke", invokeSw.ElapsedMilliseconds);
+        var (count, rowGetter) = GetFastTableAccessors(orderHeader);
+        if (count == 0)
+        {
+            return Array.Empty<SapOrderHeader>();
+        }
 
-        var parseSw = Stopwatch.StartNew();
-        var table = GetTable(function, "IT_AFRU");
-        ValidateFieldsOnce("ZETA_RFC_READ_AFRU.IT_AFRU", table,
-            _fieldMap.Afru.WorkCenterId,
-            _fieldMap.Afru.Yield,
-            _fieldMap.Afru.Reversed);
+        var firstRow = rowGetter(orderHeader, 0);
+        if (firstRow is null)
+        {
+            return ParseOrderHeadersByMaterialReflection(orderHeader);
+        }
+
+        var getField = GetFastRowStringAccessor(firstRow.GetType());
+        var results = new List<SapOrderHeader>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var row = rowGetter(orderHeader, i);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var orderNumber = SafeGetFastField(getField, row, _fieldMap.OrderHeader.OrderNumber);
+            if (string.IsNullOrWhiteSpace(orderNumber))
+            {
+                continue;
+            }
+
+            results.Add(new SapOrderHeader(
+                orderNumber.Trim(),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.Material).Trim(),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.SystemStatus).Trim(),
+                ParseInt(SafeGetFastField(getField, row, _fieldMap.OrderHeader.PlannedQuantity)),
+                ParseDate(SafeGetFastField(getField, row, _fieldMap.OrderHeader.StartDate)),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.WorkCenter).Trim(),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.SchedulerCode).Trim(),
+                SafeGetFastField(getField, row, _fieldMap.OrderHeader.Plant).Trim()));
+        }
+
+        return results;
+    }
+
+    private (int Yi1, int Yi2) ParseAfruYieldBucketsReflection(object table)
+    {
         var yi1 = 0;
         var yi2 = 0;
 
         foreach (var row in EnumerateRows(table))
         {
-            var arbid = GetString(row, _fieldMap.Afru.WorkCenterId);
-
-            var arbidNum = DigitsOnly(arbid);
+            var arbidNum = DigitsOnly(GetString(row, _fieldMap.Afru.WorkCenterId));
             if (arbidNum < 10004712 || arbidNum > 10004720)
             {
                 continue;
             }
 
-            var yieString = GetString(row, _fieldMap.Afru.Yield);
-
-            var yie = ParseInt(yieString);
-            var reversed = GetString(row, _fieldMap.Afru.Reversed);
-
-            if (string.Equals(reversed, "X", StringComparison.OrdinalIgnoreCase))
+            var yie = ParseInt(GetString(row, _fieldMap.Afru.Yield));
+            if (string.Equals(GetString(row, _fieldMap.Afru.Reversed), "X", StringComparison.OrdinalIgnoreCase))
             {
                 yie = -yie;
             }
@@ -446,8 +557,59 @@ public sealed class SapDllSapClient : ISapClient
             }
         }
 
-        AddDetailedTiming("GetAfruYieldDelta.Parse", parseSw.ElapsedMilliseconds);
-        return Task.FromResult(yi1 - yi2);
+        return (yi1, yi2);
+    }
+
+    private (int Yi1, int Yi2) ParseAfruYieldBucketsFast(object table)
+    {
+        var (count, rowGetter) = GetFastTableAccessors(table);
+        if (count == 0)
+        {
+            return (0, 0);
+        }
+
+        var firstRow = rowGetter(table, 0);
+        if (firstRow is null)
+        {
+            return ParseAfruYieldBucketsReflection(table);
+        }
+
+        var getField = GetFastRowStringAccessor(firstRow.GetType());
+        var yi1 = 0;
+        var yi2 = 0;
+
+        for (var i = 0; i < count; i++)
+        {
+            var row = rowGetter(table, i);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var arbidNum = DigitsOnly(SafeGetFastField(getField, row, _fieldMap.Afru.WorkCenterId));
+            if (arbidNum < 10004712 || arbidNum > 10004720)
+            {
+                continue;
+            }
+
+            var yie = ParseInt(SafeGetFastField(getField, row, _fieldMap.Afru.Yield));
+            if (string.Equals(SafeGetFastField(getField, row, _fieldMap.Afru.Reversed), "X", StringComparison.OrdinalIgnoreCase))
+            {
+                yie = -yie;
+            }
+
+            if (arbidNum >= 10004712 && arbidNum <= 10004718)
+            {
+                yi1 += yie;
+            }
+
+            if (arbidNum is 10004719 or 10004720)
+            {
+                yi2 += yie;
+            }
+        }
+
+        return (yi1, yi2);
     }
 
 
