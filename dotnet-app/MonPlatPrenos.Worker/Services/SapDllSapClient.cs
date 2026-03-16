@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Reflection;
+using System.Linq.Expressions;
 using System.Diagnostics;
 using System.Text;
 using System.Data;
@@ -61,6 +62,17 @@ public sealed class SapDllSapClient : ISapClient
         public readonly ConcurrentDictionary<string, NameAccessorKind> NameAccessorKinds = new(StringComparer.Ordinal);
     }
 
+    private sealed class FastTableAccessor
+    {
+        public Func<object, int>? GetCount;
+        public Func<object, int, object?>? GetRow;
+    }
+
+    private sealed class FastRowAccessor
+    {
+        public Func<object, string, string>? GetStringByName;
+    }
+
     private enum NameAccessorKind
     {
         None = 0,
@@ -81,6 +93,8 @@ public sealed class SapDllSapClient : ISapClient
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
     private static readonly ConcurrentDictionary<Type, RowAccessorCacheItem> RowAccessorCache = new();
+    private static readonly ConcurrentDictionary<Type, FastTableAccessor> FastTableAccessorCache = new();
+    private static readonly ConcurrentDictionary<Type, FastRowAccessor> FastRowAccessorCache = new();
     private readonly ConcurrentDictionary<string, bool> _validatedFieldScopes = new(StringComparer.Ordinal);
 
     public SapDllSapClient(SapIntegrationOptions options)
@@ -276,33 +290,13 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.Operation.StepCode,
             _fieldMap.Operation.ConfirmableQuantity,
             _fieldMap.Operation.WorkCenterCode);
-        var results = new List<SapOperation>();
 
-        foreach (var row in EnumerateRows(operationTable))
-        {
-            var confirmation = GetString(row, _fieldMap.Operation.Confirmation);
-            var operationCode = GetString(row, _fieldMap.Operation.OperationCode);
-            var stepCode = GetString(row, _fieldMap.Operation.StepCode);
-            var confirmableQty = ParseInt(GetString(row, _fieldMap.Operation.ConfirmableQuantity));
-            var workCenterCode = GetString(row, _fieldMap.Operation.WorkCenterCode);
-
-            if (string.IsNullOrWhiteSpace(operationCode))
-            {
-                continue;
-            }
-
-            results.Add(new SapOperation(
-                orderNumber.Trim(),
-                confirmation.Trim(),
-                operationCode.Trim(),
-                confirmableQty,
-                stepCode.Trim(),
-                workCenterCode.Trim()));
-        }
-
+        IReadOnlyList<SapOperation> results = _options.UseTypedHotPath
+            ? ParseOperationsFast(operationTable, orderNumber)
+            : ParseOperationsReflection(operationTable, orderNumber);
 
         AddDetailedTiming("GetOperations.Parse", parseSw.ElapsedMilliseconds);
-        return Task.FromResult<IReadOnlyList<SapOperation>>(results);
+        return Task.FromResult(results);
     }
 
     public Task<IReadOnlyList<SapConfirmation>> GetConfirmationsAsync(string orderNumber, string confirmation, CancellationToken cancellationToken)
@@ -320,38 +314,13 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.Confirmation.Confirmation,
             _fieldMap.Confirmation.ConfirmationCounter,
             _fieldMap.Confirmation.Yield);
-        var results = new List<SapConfirmation>();
 
-        foreach (var row in EnumerateRows(confirmationsTable))
-        {
-            var confNo = GetString(row, _fieldMap.Confirmation.Confirmation);
-            var confCounter = GetString(row, _fieldMap.Confirmation.ConfirmationCounter);
-            if (string.IsNullOrWhiteSpace(confNo) || string.IsNullOrWhiteSpace(confCounter))
-            {
-                continue;
-            }
-
-            var yield = ParseInt(GetString(row, _fieldMap.Confirmation.Yield));
-            if (yield == 0)
-            {
-                var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
-                SetImport(detailFunction, "CONFIRMATION", confNo);
-                SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
-                var detailInvokeSw = Stopwatch.StartNew();
-                InvokeFunction(detailFunction);
-                AddDetailedTiming("GetConfirmations.DetailInvoke", detailInvokeSw.ElapsedMilliseconds);
-
-                var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
-                ValidateStructureFieldsOnce("BAPI_PRODORDCONF_GETDETAIL.CONF_DETAIL", confDetail, _fieldMap.Confirmation.DetailYield);
-                yield = ParseInt(GetString(confDetail, _fieldMap.Confirmation.DetailYield));
-            }
-
-            results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
-        }
-
+        IReadOnlyList<SapConfirmation> results = _options.UseTypedHotPath
+            ? ParseConfirmationsFast(confirmationsTable)
+            : ParseConfirmationsReflection(confirmationsTable);
 
         AddDetailedTiming("GetConfirmations.Parse", parseSw.ElapsedMilliseconds);
-        return Task.FromResult<IReadOnlyList<SapConfirmation>>(results);
+        return Task.FromResult(results);
     }
 
     public Task<IReadOnlyList<SapComponent>> GetComponentsAsync(string orderNumber, CancellationToken cancellationToken)
@@ -369,27 +338,13 @@ public sealed class SapDllSapClient : ISapClient
         ValidateFieldsOnce("BAPI_PRODORD_GET_DETAIL.COMPONENT", componentTable,
             _fieldMap.Component.Material,
             _fieldMap.Component.Description);
-        var results = new List<SapComponent>();
 
-        foreach (var row in EnumerateRows(componentTable))
-        {
-            var material = GetString(row, _fieldMap.Component.Material);
-            var description = GetString(row, _fieldMap.Component.Description);
-
-            if (string.IsNullOrWhiteSpace(material))
-            {
-                continue;
-            }
-
-            results.Add(new SapComponent(
-                orderNumber.Trim(),
-                material.Trim(),
-                description.Trim()));
-        }
-
+        IReadOnlyList<SapComponent> results = _options.UseTypedHotPath
+            ? ParseComponentsFast(componentTable, orderNumber)
+            : ParseComponentsReflection(componentTable, orderNumber);
 
         AddDetailedTiming("GetComponents.Parse", parseSw.ElapsedMilliseconds);
-        return Task.FromResult<IReadOnlyList<SapComponent>>(results);
+        return Task.FromResult(results);
     }
 
 
@@ -493,6 +448,313 @@ public sealed class SapDllSapClient : ISapClient
 
         AddDetailedTiming("GetAfruYieldDelta.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult(yi1 - yi2);
+    }
+
+
+    private IReadOnlyList<SapConfirmation> ParseConfirmationsReflection(object confirmationsTable)
+    {
+        var results = new List<SapConfirmation>();
+
+        foreach (var row in EnumerateRows(confirmationsTable))
+        {
+            var confNo = GetString(row, _fieldMap.Confirmation.Confirmation);
+            var confCounter = GetString(row, _fieldMap.Confirmation.ConfirmationCounter);
+            if (string.IsNullOrWhiteSpace(confNo) || string.IsNullOrWhiteSpace(confCounter))
+            {
+                continue;
+            }
+
+            var yield = ParseInt(GetString(row, _fieldMap.Confirmation.Yield));
+            if (yield == 0)
+            {
+                yield = LoadConfirmationDetailYieldReflection(confNo, confCounter);
+            }
+
+            results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
+        }
+
+        return results;
+    }
+
+    private IReadOnlyList<SapConfirmation> ParseConfirmationsFast(object confirmationsTable)
+    {
+        var (count, rowGetter) = GetFastTableAccessors(confirmationsTable);
+        if (count == 0)
+        {
+            return Array.Empty<SapConfirmation>();
+        }
+
+        var firstRow = rowGetter(confirmationsTable, 0);
+        if (firstRow is null)
+        {
+            return ParseConfirmationsReflection(confirmationsTable);
+        }
+
+        var getField = GetFastRowStringAccessor(firstRow.GetType());
+        var results = new List<SapConfirmation>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var row = rowGetter(confirmationsTable, i);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var confNo = SafeGetFastField(getField, row, _fieldMap.Confirmation.Confirmation);
+            var confCounter = SafeGetFastField(getField, row, _fieldMap.Confirmation.ConfirmationCounter);
+            if (string.IsNullOrWhiteSpace(confNo) || string.IsNullOrWhiteSpace(confCounter))
+            {
+                continue;
+            }
+
+            var yield = ParseInt(SafeGetFastField(getField, row, _fieldMap.Confirmation.Yield));
+            if (yield == 0)
+            {
+                yield = LoadConfirmationDetailYieldFast(confNo, confCounter);
+            }
+
+            results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
+        }
+
+        return results;
+    }
+
+    private int LoadConfirmationDetailYieldReflection(string confNo, string confCounter)
+    {
+        var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
+        SetImport(detailFunction, "CONFIRMATION", confNo);
+        SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
+        var detailInvokeSw = Stopwatch.StartNew();
+        InvokeFunction(detailFunction);
+        AddDetailedTiming("GetConfirmations.DetailInvoke", detailInvokeSw.ElapsedMilliseconds);
+
+        var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
+        ValidateStructureFieldsOnce("BAPI_PRODORDCONF_GETDETAIL.CONF_DETAIL", confDetail, _fieldMap.Confirmation.DetailYield);
+        return ParseInt(GetString(confDetail, _fieldMap.Confirmation.DetailYield));
+    }
+
+    private int LoadConfirmationDetailYieldFast(string confNo, string confCounter)
+    {
+        var detailFunction = CreateFunction("BAPI_PRODORDCONF_GETDETAIL");
+        SetImport(detailFunction, "CONFIRMATION", confNo);
+        SetImport(detailFunction, "CONFIRMATIONCOUNTER", confCounter);
+        var detailInvokeSw = Stopwatch.StartNew();
+        InvokeFunction(detailFunction);
+        AddDetailedTiming("GetConfirmations.DetailInvoke", detailInvokeSw.ElapsedMilliseconds);
+
+        var confDetail = GetStructure(detailFunction, "CONF_DETAIL");
+        ValidateStructureFieldsOnce("BAPI_PRODORDCONF_GETDETAIL.CONF_DETAIL", confDetail, _fieldMap.Confirmation.DetailYield);
+        var getField = GetFastRowStringAccessor(confDetail.GetType());
+        return ParseInt(SafeGetFastField(getField, confDetail, _fieldMap.Confirmation.DetailYield));
+    }
+
+    private IReadOnlyList<SapOperation> ParseOperationsReflection(object operationTable, string orderNumber)
+    {
+        var results = new List<SapOperation>();
+        foreach (var row in EnumerateRows(operationTable))
+        {
+            var confirmation = GetString(row, _fieldMap.Operation.Confirmation);
+            var operationCode = GetString(row, _fieldMap.Operation.OperationCode);
+            var stepCode = GetString(row, _fieldMap.Operation.StepCode);
+            var confirmableQty = ParseInt(GetString(row, _fieldMap.Operation.ConfirmableQuantity));
+            var workCenterCode = GetString(row, _fieldMap.Operation.WorkCenterCode);
+
+            if (string.IsNullOrWhiteSpace(operationCode))
+            {
+                continue;
+            }
+
+            results.Add(new SapOperation(orderNumber.Trim(), confirmation.Trim(), operationCode.Trim(), confirmableQty, stepCode.Trim(), workCenterCode.Trim()));
+        }
+
+        return results;
+    }
+
+    private IReadOnlyList<SapOperation> ParseOperationsFast(object operationTable, string orderNumber)
+    {
+        var (count, rowGetter) = GetFastTableAccessors(operationTable);
+        if (count == 0)
+        {
+            return Array.Empty<SapOperation>();
+        }
+
+        var firstRow = rowGetter(operationTable, 0);
+        if (firstRow is null)
+        {
+            return ParseOperationsReflection(operationTable, orderNumber);
+        }
+
+        var getField = GetFastRowStringAccessor(firstRow.GetType());
+        var results = new List<SapOperation>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var row = rowGetter(operationTable, i);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var confirmation = SafeGetFastField(getField, row, _fieldMap.Operation.Confirmation);
+            var operationCode = SafeGetFastField(getField, row, _fieldMap.Operation.OperationCode);
+            var stepCode = SafeGetFastField(getField, row, _fieldMap.Operation.StepCode);
+            var confirmableQty = ParseInt(SafeGetFastField(getField, row, _fieldMap.Operation.ConfirmableQuantity));
+            var workCenterCode = SafeGetFastField(getField, row, _fieldMap.Operation.WorkCenterCode);
+
+            if (string.IsNullOrWhiteSpace(operationCode))
+            {
+                continue;
+            }
+
+            results.Add(new SapOperation(orderNumber.Trim(), confirmation.Trim(), operationCode.Trim(), confirmableQty, stepCode.Trim(), workCenterCode.Trim()));
+        }
+
+        return results;
+    }
+
+    private IReadOnlyList<SapComponent> ParseComponentsReflection(object componentTable, string orderNumber)
+    {
+        var results = new List<SapComponent>();
+        foreach (var row in EnumerateRows(componentTable))
+        {
+            var material = GetString(row, _fieldMap.Component.Material);
+            var description = GetString(row, _fieldMap.Component.Description);
+
+            if (string.IsNullOrWhiteSpace(material))
+            {
+                continue;
+            }
+
+            results.Add(new SapComponent(orderNumber.Trim(), material.Trim(), description.Trim()));
+        }
+
+        return results;
+    }
+
+    private IReadOnlyList<SapComponent> ParseComponentsFast(object componentTable, string orderNumber)
+    {
+        var (count, rowGetter) = GetFastTableAccessors(componentTable);
+        if (count == 0)
+        {
+            return Array.Empty<SapComponent>();
+        }
+
+        var firstRow = rowGetter(componentTable, 0);
+        if (firstRow is null)
+        {
+            return ParseComponentsReflection(componentTable, orderNumber);
+        }
+
+        var getField = GetFastRowStringAccessor(firstRow.GetType());
+        var results = new List<SapComponent>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var row = rowGetter(componentTable, i);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var material = SafeGetFastField(getField, row, _fieldMap.Component.Material);
+            var description = SafeGetFastField(getField, row, _fieldMap.Component.Description);
+
+            if (string.IsNullOrWhiteSpace(material))
+            {
+                continue;
+            }
+
+            results.Add(new SapComponent(orderNumber.Trim(), material.Trim(), description.Trim()));
+        }
+
+        return results;
+    }
+
+    private static (int Count, Func<object, int, object?> RowGetter) GetFastTableAccessors(object table)
+    {
+        var access = FastTableAccessorCache.GetOrAdd(table.GetType(), CreateFastTableAccessor);
+        var countGetter = access.GetCount ?? throw new InvalidOperationException("Could not read SAP table Count.");
+        var rowGetter = access.GetRow ?? throw new InvalidOperationException("Could not access SAP table row indexer.");
+        return (countGetter(table), rowGetter);
+    }
+
+    private static Func<object, string, string> GetFastRowStringAccessor(Type rowType)
+    {
+        var access = FastRowAccessorCache.GetOrAdd(rowType, CreateFastRowAccessor);
+        if (access.GetStringByName is null)
+        {
+            throw new InvalidOperationException($"Could not find row.GetString(string) for {rowType.FullName}.");
+        }
+
+        return access.GetStringByName;
+    }
+
+    private static FastTableAccessor CreateFastTableAccessor(Type tableType)
+    {
+        var accessor = new FastTableAccessor();
+
+        var countProperty = tableType.GetProperty("Count");
+        if (countProperty is not null)
+        {
+            var tableArg = Expression.Parameter(typeof(object), "table");
+            var cast = Expression.Convert(tableArg, tableType);
+            var countAccess = Expression.Property(cast, countProperty);
+            var boxedInt = Expression.Convert(countAccess, typeof(int));
+            accessor.GetCount = Expression.Lambda<Func<object, int>>(boxedInt, tableArg).Compile();
+        }
+
+        var indexer = tableType.GetMethod("get_Item", new[] { typeof(int) });
+        if (indexer is not null)
+        {
+            var tableArg = Expression.Parameter(typeof(object), "table");
+            var indexArg = Expression.Parameter(typeof(int), "index");
+            var cast = Expression.Convert(tableArg, tableType);
+            var call = Expression.Call(cast, indexer, indexArg);
+            var boxed = Expression.Convert(call, typeof(object));
+            accessor.GetRow = Expression.Lambda<Func<object, int, object?>>(boxed, tableArg, indexArg).Compile();
+        }
+
+        return accessor;
+    }
+
+    private static FastRowAccessor CreateFastRowAccessor(Type rowType)
+    {
+        var accessor = new FastRowAccessor();
+        var getString = rowType.GetMethod("GetString", new[] { typeof(string) });
+        if (getString is not null)
+        {
+            var rowArg = Expression.Parameter(typeof(object), "row");
+            var nameArg = Expression.Parameter(typeof(string), "name");
+            var cast = Expression.Convert(rowArg, rowType);
+            var call = Expression.Call(cast, getString, nameArg);
+            var normalize = Expression.Call(typeof(SapDllSapClient), nameof(NormalizeString), Type.EmptyTypes, Expression.Convert(call, typeof(object)));
+            accessor.GetStringByName = Expression.Lambda<Func<object, string, string>>(normalize, rowArg, nameArg).Compile();
+        }
+
+        return accessor;
+    }
+
+    private static string NormalizeString(object? value)
+    {
+        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static string SafeGetFastField(Func<object, string, string> getter, object row, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(fieldName))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return getter(row, fieldName);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private object CreateFunction(string functionName)
