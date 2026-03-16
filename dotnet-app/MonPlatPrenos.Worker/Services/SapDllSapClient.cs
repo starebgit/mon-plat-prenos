@@ -57,8 +57,8 @@ public sealed class SapDllSapClient : ISapClient
 
     private sealed class RowAccessorCacheItem
     {
-        public MethodInfo? GetStringByName;
-        public MethodInfo? GetValueByName;
+        public Func<object, string, string>? GetStringByName;
+        public Func<object, string, string>? GetValueByName;
         public readonly ConcurrentDictionary<string, NameAccessorKind> NameAccessorKinds = new(StringComparer.Ordinal);
     }
 
@@ -1291,12 +1291,33 @@ public sealed class SapDllSapClient : ISapClient
     {
         return new RowAccessorCacheItem
         {
-            GetStringByName = rowType.GetMethod("GetString", new[] { typeof(string) }),
-            GetValueByName = rowType.GetMethod("GetValue", new[] { typeof(string) })
+            GetStringByName = CreateRowStringDelegate(rowType, "GetString"),
+            GetValueByName = CreateRowStringDelegate(rowType, "GetValue")
         };
     }
 
-    private static bool TryInvokeStringAccessor(object target, MethodInfo? accessor, string fieldName, out string value)
+    private static Func<object, string, string>? CreateRowStringDelegate(Type rowType, string methodName)
+    {
+        var accessor = rowType.GetMethod(methodName, new[] { typeof(string) });
+        if (accessor is null)
+        {
+            return null;
+        }
+
+        var rowArg = Expression.Parameter(typeof(object), "row");
+        var nameArg = Expression.Parameter(typeof(string), "fieldName");
+        var cast = Expression.Convert(rowArg, rowType);
+        var call = Expression.Call(cast, accessor, nameArg);
+        var normalize = Expression.Call(
+            typeof(SapDllSapClient),
+            nameof(NormalizeString),
+            Type.EmptyTypes,
+            Expression.Convert(call, typeof(object)));
+
+        return Expression.Lambda<Func<object, string, string>>(normalize, rowArg, nameArg).Compile();
+    }
+
+    private static bool TryInvokeStringAccessor(object target, Func<object, string, string>? accessor, string fieldName, out string value)
     {
         if (accessor is null)
         {
@@ -1306,10 +1327,10 @@ public sealed class SapDllSapClient : ISapClient
 
         try
         {
-            value = Convert.ToString(accessor.Invoke(target, new object[] { fieldName }), CultureInfo.InvariantCulture) ?? string.Empty;
+            value = accessor(target, fieldName);
             return true;
         }
-        catch (TargetInvocationException)
+        catch
         {
             value = string.Empty;
             return false;
