@@ -36,6 +36,59 @@ dotnet run
 
 When using `--run-once`, `--from-date` is optional and sets the one-day run date (`DateTime.Today` when omitted). `--to-date` is ignored.
 
+## Phase 0 benchmark mode (baseline + guardrails)
+
+You can now enable a reproducible benchmark snapshot in `Prenos:Benchmark`:
+
+```json
+"Prenos": {
+  "Plant": "1061",
+  "OrderFrom": "000005223286",
+  "Benchmark": {
+    "Enabled": true,
+    "SnapshotPath": "output/baseline-snapshot.json",
+    "CompareSnapshotPath": "output/baseline-snapshot.json"
+  }
+}
+```
+
+Behavior when enabled:
+- writes `output/benchmark-*.json` with runtime, per-step timings, SAP timing report, and deterministic output digests,
+- optionally writes a baseline snapshot to `SnapshotPath`,
+- optionally compares current output digests to `CompareSnapshotPath` and fails fast on drift.
+
+## Phase 1 hot-path mode
+
+`Prenos:UseTypedHotPath` controls the optimized parser path for hot SAP table parsing calls:
+- `GetOperationsAsync`
+- `GetComponentsAsync`
+- `GetConfirmationsAsync` (including detail-yield read when list yield is 0)
+
+When `true` (default), the worker uses cached compiled delegates for SAP table row + field access in those methods to avoid repeated `MethodInfo.Invoke` in row loops.
+Set it to `false` for immediate rollback to the older reflection row parser.
+
+## Phase 2 bounded order concurrency
+
+Use these knobs to safely parallelize order processing:
+- `Prenos:OrderConcurrency` (default `1`) controls how many orders are processed concurrently.
+- `Prenos:MaxSapCallsInFlight` (default `8`) sets a global SAP-call semaphore across all order workers.
+
+Start with conservative values (for example `OrderConcurrency=3`, `MaxSapCallsInFlight=6`) and use benchmark snapshots to tune.
+
+## Phase 3 confirmation/detail cleanup
+
+Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
+
+## Phase 4 call-volume reduction
+
+Phase 4 adds two business-safe volume controls:
+- `Prenos:EnableSemiFinishedExpansion` (default `true`): when `false`, skips recursive semi-finished SAP expansion (`Samot/Protektor/Sponka/Obroc/Ulitki`), keeping only direct plate-component matching.
+- `Prenos:Watermark`:
+  - `Enabled`: when `true`, uses and updates a persisted order watermark to move `OrderFrom` forward between runs,
+  - `FilePath`: watermark file path (default `output/orderfrom.watermark.txt`).
+
+The effective `orderFrom` is `max(Prenos:OrderFrom, watermarkValue)` when watermarking is enabled.
+
 `--run-once` does two steps:
 
 1. login/config check (loads SAP settings from direct `Prenos:Sap` values or DB lookup and prints `RUN-ONCE LOGIN CHECK`)

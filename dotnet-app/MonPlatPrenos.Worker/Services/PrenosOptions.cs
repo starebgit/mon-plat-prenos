@@ -14,11 +14,33 @@ public sealed class PrenosOptions
     public List<TermRule> DefaultTerms { get; set; } = new List<TermRule>();
     public List<TermRule> ExtraTerms { get; set; } = new List<TermRule>();
     public int ConfirmationConcurrency { get; set; } = 4;
+    public int OrderConcurrency { get; set; } = 1;
+    public int MaxSapCallsInFlight { get; set; } = 8;
+    public string Plant { get; set; } = "1061";
+    public string OrderFrom { get; set; } = "000005223286";
+    public BenchmarkOptions Benchmark { get; set; } = new BenchmarkOptions();
+    public bool UseTypedHotPath { get; set; } = true;
+    public bool EnableSemiFinishedExpansion { get; set; } = true;
+    public WatermarkOptions Watermark { get; set; } = new WatermarkOptions();
     public SapIntegrationOptions Sap { get; set; } = new SapIntegrationOptions();
+}
+
+public sealed class BenchmarkOptions
+{
+    public bool Enabled { get; set; }
+    public string? SnapshotPath { get; set; }
+    public string? CompareSnapshotPath { get; set; }
+}
+
+public sealed class WatermarkOptions
+{
+    public bool Enabled { get; set; }
+    public string FilePath { get; set; } = "output/orderfrom.watermark.txt";
 }
 
 public sealed class SapIntegrationOptions
 {
+    public bool UseTypedHotPath { get; set; } = true;
     public string SapDllPath { get; set; } = "sapnco.dll";
     public string SaUtilsDllPath { get; set; } = "sapnco_utils.dll";
     public string? DestinationName { get; set; }

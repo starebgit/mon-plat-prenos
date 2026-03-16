@@ -27,9 +27,10 @@ public sealed class PrenosJob
 
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
+        var runSw = Stopwatch.StartNew();
 
-        var plant = "1061";
-        var orderFrom = "000005223286";
+        var plant = _options.Plant;
+        var orderFrom = ResolveOrderFrom();
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
@@ -50,152 +51,315 @@ public sealed class PrenosJob
                 cancellationToken));
 
         stats.TotalOrdersFetched = orders.Count;
+        var maxFetchedOrderNumber = orders.Select(o => o.OrderNumber).Where(o => !string.IsNullOrWhiteSpace(o)).OrderBy(o => o, StringComparer.Ordinal).LastOrDefault();
         RenderSingleLineStatus($"Fetched {orders.Count} production orders. Processing...");
         status.ForceNext();
+
+        var sapCallLimit = Math.Max(1, _options.MaxSapCallsInFlight);
+        using var sapCallSemaphore = new SemaphoreSlim(sapCallLimit, sapCallLimit);
+        var orderConcurrency = Math.Max(1, _options.OrderConcurrency);
+
+        var orderTasks = orders.Select((order, orderIndex) => (Func<Task<OrderProcessingResult>>)(() => ProcessOrderAsync(
+            order,
+            orderIndex,
+            orders.Count,
+            forDate,
+            operationCodes,
+            allRules,
+            timing,
+            sapCallSemaphore,
+            status,
+            cancellationToken)));
+
+        var orderedResults = orderConcurrency <= 1
+            ? await RunSequentialAsync(orderTasks, cancellationToken)
+            : await RunConcurrentAsync(orderTasks, orderConcurrency, cancellationToken);
 
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
         var semiFinished = new List<SemiFinishedTrace>();
 
-        for (var orderIndex = 0; orderIndex < orders.Count; orderIndex++)
+        foreach (var result in orderedResults)
         {
-            var order = orders[orderIndex];
-            var progressBar = BuildProgressBar(orderIndex + 1, orders.Count, 22);
-            RenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Plates:{stats.PlateRecordsWritten} Unified:{stats.UnifiedRowsWritten}");
-            if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
+            stats.MergeFrom(result.Stats);
+            plateDemands.AddRange(result.PlateDemands);
+            unified.AddRange(result.Unified);
+            semiFinished.AddRange(result.SemiFinished);
+        }
+
+        ClearSingleLineStatus();
+        var runtimeMs = runSw.ElapsedMilliseconds;
+        Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
+        await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
+
+        if (_options.Benchmark.Enabled)
+        {
+            await WriteBenchmarkArtifactsAsync(
+                plateDemands,
+                unified,
+                semiFinished,
+                stats,
+                timing,
+                runtimeMs,
+                cancellationToken);
+        }
+
+        TryPersistOrderFromWatermark(maxFetchedOrderNumber);
+    }
+
+    private string ResolveOrderFrom()
+    {
+        var configured = _options.OrderFrom?.Trim() ?? string.Empty;
+        if (!_options.Watermark.Enabled)
+        {
+            return configured;
+        }
+
+        var watermark = TryReadOrderFromWatermark();
+        if (string.IsNullOrWhiteSpace(watermark))
+        {
+            return configured;
+        }
+
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return watermark;
+        }
+
+        return string.CompareOrdinal(watermark, configured) > 0 ? watermark : configured;
+    }
+
+    private string? TryReadOrderFromWatermark()
+    {
+        try
+        {
+            var path = _options.Watermark.FilePath;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
-                stats.SkippedByDateFilter++;
-                continue;
+                return null;
             }
 
-            if (order.Status is "TEHZ" or "ZAKL")
+            var value = File.ReadAllText(path).Trim();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void TryPersistOrderFromWatermark(string? maxFetchedOrderNumber)
+    {
+        if (!_options.Watermark.Enabled || string.IsNullOrWhiteSpace(maxFetchedOrderNumber))
+        {
+            return;
+        }
+
+        try
+        {
+            var path = _options.Watermark.FilePath;
+            if (string.IsNullOrWhiteSpace(path))
             {
-                stats.SkippedByStatus++;
-                continue;
+                return;
             }
 
-            if (order.Material.Length < 9 || (order.Material[8] is not ('4' or '3' or '2')))
+            var existing = TryReadOrderFromWatermark();
+            if (!string.IsNullOrWhiteSpace(existing) && string.CompareOrdinal(existing, maxFetchedOrderNumber) >= 0)
             {
-                stats.SkippedByMaterialRule++;
-                continue;
+                return;
             }
 
-            stats.OrdersAfterCoreFilters++;
-            var operations = await TimedAsync(timing, "GetOperations", () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
-            var validOperations = operations
-                .Where(o => operationCodes.Contains(o.OperationCode))
-                .Where(o => o.ConfirmableQty > 0)
-                .Where(o => o.StepCode == "0010")
-                .ToList();
-
-            stats.OperationRowsRead += operations.Count;
-            stats.ValidOperations += validOperations.Count;
-
-            var totalYield = 0;
-            var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
-            if (maxConcurrency == 1 || validOperations.Count <= 1)
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(dir))
             {
-                for (var operationIndex = 0; operationIndex < validOperations.Count; operationIndex++)
+                Directory.CreateDirectory(dir);
+            }
+
+            File.WriteAllText(path, maxFetchedOrderNumber);
+        }
+        catch
+        {
+            // watermark is best-effort and should never fail the job
+        }
+    }
+
+    private async Task<List<OrderProcessingResult>> RunSequentialAsync(IEnumerable<Func<Task<OrderProcessingResult>>> orderTaskFactories, CancellationToken cancellationToken)
+    {
+        var results = new List<OrderProcessingResult>();
+        foreach (var taskFactory in orderTaskFactories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            results.Add(await taskFactory().ConfigureAwait(false));
+        }
+
+        return results.OrderBy(r => r.OrderIndex).ToList();
+    }
+
+    private static async Task<List<OrderProcessingResult>> RunConcurrentAsync(IEnumerable<Func<Task<OrderProcessingResult>>> taskFactories, int concurrency, CancellationToken cancellationToken)
+    {
+        using var orderSemaphore = new SemaphoreSlim(concurrency, concurrency);
+        var wrappedTasks = taskFactories.Select(async taskFactory =>
+        {
+            await orderSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await taskFactory().ConfigureAwait(false);
+            }
+            finally
+            {
+                orderSemaphore.Release();
+            }
+        });
+
+        var results = await Task.WhenAll(wrappedTasks).ConfigureAwait(false);
+        return results.OrderBy(r => r.OrderIndex).ToList();
+    }
+
+    private async Task<OrderProcessingResult> ProcessOrderAsync(
+        SapOrderHeader order,
+        int orderIndex,
+        int totalOrders,
+        DateTime? forDate,
+        HashSet<string> operationCodes,
+        IReadOnlyList<TermRule> allRules,
+        TimingCollector timing,
+        SemaphoreSlim sapCallSemaphore,
+        ProgressStatus status,
+        CancellationToken cancellationToken)
+    {
+        var result = new OrderProcessingResult(orderIndex);
+        var stats = result.Stats;
+
+        if (_options.OrderConcurrency <= 1)
+        {
+            var progressBar = BuildProgressBar(orderIndex + 1, totalOrders, 22);
+            RenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{totalOrders} | {order.OrderNumber}");
+            status.ForceNext();
+        }
+
+        if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
+        {
+            stats.SkippedByDateFilter++;
+            return result;
+        }
+
+        if (order.Status is "TEHZ" or "ZAKL")
+        {
+            stats.SkippedByStatus++;
+            return result;
+        }
+
+        if (order.Material.Length < 9 || (order.Material[8] is not ('4' or '3' or '2')))
+        {
+            stats.SkippedByMaterialRule++;
+            return result;
+        }
+
+        stats.OrdersAfterCoreFilters++;
+        var operations = await TimedSapCallAsync(timing, "GetOperations", sapCallSemaphore, cancellationToken, () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
+        var validOperations = operations
+            .Where(o => operationCodes.Contains(o.OperationCode))
+            .Where(o => o.ConfirmableQty > 0)
+            .Where(o => o.StepCode == "0010")
+            .ToList();
+
+        stats.OperationRowsRead += operations.Count;
+        stats.ValidOperations += validOperations.Count;
+
+        var totalYield = 0;
+        var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
+        if (maxConcurrency == 1 || validOperations.Count <= 1)
+        {
+            foreach (var op in validOperations)
+            {
+                var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
+                stats.ConfirmationRowsRead += confirmations.Count;
+                totalYield += confirmations.Sum(c => c.Yield);
+            }
+        }
+        else
+        {
+            using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+            var confirmationTasks = validOperations.Select(async op =>
+            {
+                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    var op = validOperations[operationIndex];
-                    if (operationIndex == 0 || operationIndex % 5 == 0)
-                    {
-                        TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
-                    }
-
-                    var confirmations = await TimedAsync(timing, "GetConfirmations", () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
-                    stats.ConfirmationRowsRead += confirmations.Count;
-                    totalYield += confirmations.Sum(c => c.Yield);
+                    var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
+                    return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
                 }
-            }
-            else
-            {
-                using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-                var confirmationTasks = validOperations.Select(async (op, operationIndex) =>
+                finally
                 {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    try
-                    {
-                        if (operationIndex == 0 || operationIndex % 5 == 0)
-                        {
-                            TryRenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{orders.Count} | {order.OrderNumber} | Op {operationIndex + 1}/{validOperations.Count}", status);
-                        }
-
-                        var confirmations = await TimedAsync(timing, "GetConfirmations", () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
-                        return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                });
-
-                var confirmationResults = await Task.WhenAll(confirmationTasks).ConfigureAwait(false);
-                foreach (var result in confirmationResults)
-                {
-                    stats.ConfirmationRowsRead += result.Count;
-                    totalYield += result.Yield;
+                    semaphore.Release();
                 }
-            }
+            });
 
-            var missingQty = order.PlannedQuantity - totalYield;
-            if (missingQty <= 0)
+            var confirmationResults = await Task.WhenAll(confirmationTasks).ConfigureAwait(false);
+            foreach (var item in confirmationResults)
             {
-                stats.SkippedByMissingQty++;
-                continue;
+                stats.ConfirmationRowsRead += item.Count;
+                totalYield += item.Yield;
             }
+        }
 
-            var operationTrackCode = validOperations
-                .Select(o => o.WorkCenterCode)
-                .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
-            var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
-            var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
-            plateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
-            stats.PlateRecordsWritten++;
+        var missingQty = order.PlannedQuantity - totalYield;
+        if (missingQty <= 0)
+        {
+            stats.SkippedByMissingQty++;
+            return result;
+        }
 
-            var components = await TimedAsync(timing, "GetComponents", () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
-            stats.ComponentRowsRead += components.Count;
+        var operationTrackCode = validOperations
+            .Select(o => o.WorkCenterCode)
+            .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
+        var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
+        var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
+        result.PlateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
+        stats.PlateRecordsWritten++;
 
-            foreach (var component in components)
+        var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
+        stats.ComponentRowsRead += components.Count;
+
+        foreach (var component in components)
+        {
+            foreach (var rule in allRules)
             {
-                foreach (var rule in allRules)
+                if (!rule.IsMatch(component.Description))
                 {
-                    if (!rule.IsMatch(component.Description))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    unified.Add(new UnifiedItem(
-                        order.OrderNumber,
-                        formattedPlateMaterial,
-                        FormatMaterialLikeDelphi(component.Material),
-                        component.Description,
-                        rule.Name,
-                        missingQty,
-                        DateTime.UtcNow));
+                result.Unified.Add(new UnifiedItem(
+                    order.OrderNumber,
+                    formattedPlateMaterial,
+                    FormatMaterialLikeDelphi(component.Material),
+                    component.Description,
+                    rule.Name,
+                    missingQty,
+                    DateTime.UtcNow));
 
-                    stats.UnifiedRowsWritten++;
-                    stats.AddCategoryHit(rule.Name);
+                stats.UnifiedRowsWritten++;
+                stats.AddCategoryHit(rule.Name);
 
+                if (_options.EnableSemiFinishedExpansion)
+                {
                     if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ObdelajSamotAsync(order, component, semiFinished, unified, stats, timing, cancellationToken);
+                        await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken);
                     }
                     else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
                              || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
                              || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ObdelajPolIzdAsync(order, component, rule.Name, semiFinished, unified, stats, timing, cancellationToken, depth: 0);
+                        await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 0);
                     }
-
-                    break;
                 }
+
+                break;
             }
         }
 
-        ClearSingleLineStatus();
-        Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
-        await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
+        return result;
     }
 
     private async Task ObdelajSamotAsync(
@@ -205,13 +369,14 @@ public sealed class PrenosJob
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
         TimingCollector timing,
+        SemaphoreSlim sapCallSemaphore,
         CancellationToken cancellationToken)
     {
-        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, cancellationToken, depth: 0);
+        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 0);
 
         foreach (var samotOrder in samotOrders)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, cancellationToken);
         }
     }
 
@@ -223,6 +388,7 @@ public sealed class PrenosJob
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
         TimingCollector timing,
+        SemaphoreSlim sapCallSemaphore,
         CancellationToken cancellationToken,
         int depth)
     {
@@ -231,9 +397,11 @@ public sealed class PrenosJob
             return Array.Empty<SapOrderHeader>();
         }
 
-        var subOrders = await TimedAsync(
+        var subOrders = await TimedSapCallAsync(
             timing,
             "GetProductionOrdersByMaterial",
+            sapCallSemaphore,
+            cancellationToken,
             () => _sapClient.GetProductionOrdersByMaterialAsync(
                 plateOrder.Plant,
                 semiComponent.Material,
@@ -242,9 +410,11 @@ public sealed class PrenosJob
 
         if (subOrders.Count == 0)
         {
-            subOrders = await TimedAsync(
+            subOrders = await TimedSapCallAsync(
                 timing,
                 "GetProductionOrdersByMaterialFallback",
+                sapCallSemaphore,
+                cancellationToken,
                 () => _sapClient.GetProductionOrdersByMaterialAsync(
                     plateOrder.Plant,
                     semiComponent.Material,
@@ -254,7 +424,7 @@ public sealed class PrenosJob
 
         foreach (var subOrder in subOrders)
         {
-            var afruDelta = await TimedAsync(timing, "GetAfruYieldDelta", () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken));
+            var afruDelta = await TimedSapCallAsync(timing, "GetAfruYieldDelta", sapCallSemaphore, cancellationToken, () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken));
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
@@ -289,16 +459,17 @@ public sealed class PrenosJob
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
         TimingCollector timing,
+        SemaphoreSlim sapCallSemaphore,
         CancellationToken cancellationToken)
     {
-        var components = await TimedAsync(timing, "GetComponents", () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
+        var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
         stats.ComponentRowsRead += components.Count;
 
         foreach (var cmp in components)
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, cancellationToken, depth: 1);
+                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 1);
                 continue;
             }
 
@@ -326,6 +497,20 @@ public sealed class PrenosJob
                 stats.AddCategoryHit("Spirala");
             }
         }
+    }
+
+    private sealed class OrderProcessingResult
+    {
+        public OrderProcessingResult(int orderIndex)
+        {
+            OrderIndex = orderIndex;
+        }
+
+        public int OrderIndex { get; }
+        public ProcessingStats Stats { get; } = new ProcessingStats();
+        public List<PlateDemandRecord> PlateDemands { get; } = new List<PlateDemandRecord>();
+        public List<UnifiedItem> Unified { get; } = new List<UnifiedItem>();
+        public List<SemiFinishedTrace> SemiFinished { get; } = new List<SemiFinishedTrace>();
     }
 
     private sealed class ProcessingStats
@@ -356,6 +541,35 @@ public sealed class PrenosJob
                 CategoryHits.Add(category, 1);
             }
         }
+
+        public void MergeFrom(ProcessingStats other)
+        {
+            TotalOrdersFetched += other.TotalOrdersFetched;
+            SkippedByDateFilter += other.SkippedByDateFilter;
+            SkippedByStatus += other.SkippedByStatus;
+            SkippedByMaterialRule += other.SkippedByMaterialRule;
+            OrdersAfterCoreFilters += other.OrdersAfterCoreFilters;
+            OperationRowsRead += other.OperationRowsRead;
+            ValidOperations += other.ValidOperations;
+            ConfirmationRowsRead += other.ConfirmationRowsRead;
+            SkippedByMissingQty += other.SkippedByMissingQty;
+            ComponentRowsRead += other.ComponentRowsRead;
+            PlateRecordsWritten += other.PlateRecordsWritten;
+            UnifiedRowsWritten += other.UnifiedRowsWritten;
+            SemiFinishedRowsWritten += other.SemiFinishedRowsWritten;
+
+            foreach (var hit in other.CategoryHits)
+            {
+                if (CategoryHits.ContainsKey(hit.Key))
+                {
+                    CategoryHits[hit.Key] += hit.Value;
+                }
+                else
+                {
+                    CategoryHits.Add(hit.Key, hit.Value);
+                }
+            }
+        }
     }
 
     private async Task WriteOutputAsync(
@@ -377,6 +591,170 @@ public sealed class PrenosJob
         await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
     }
 
+
+
+    private async Task WriteBenchmarkArtifactsAsync(
+        IReadOnlyList<PlateDemandRecord> plateDemands,
+        IReadOnlyList<UnifiedItem> unified,
+        IReadOnlyList<SemiFinishedTrace> semiFinished,
+        ProcessingStats stats,
+        TimingCollector timing,
+        long runtimeMs,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(_options.OutputDirectory);
+
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var benchmarkPath = Path.Combine(_options.OutputDirectory, $"benchmark-{stamp}.json");
+        var benchmark = BuildBenchmarkSnapshot(plateDemands, unified, semiFinished, stats, timing, runtimeMs);
+
+        await WriteAllTextCompatAsync(
+            benchmarkPath,
+            JsonSerializer.Serialize(benchmark, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+
+        Console.WriteLine($"Benchmark snapshot written: {benchmarkPath}");
+
+        if (!string.IsNullOrWhiteSpace(_options.Benchmark.SnapshotPath))
+        {
+            var snapshotPath = _options.Benchmark.SnapshotPath!;
+            var snapshotDir = Path.GetDirectoryName(snapshotPath);
+            if (!string.IsNullOrWhiteSpace(snapshotDir))
+            {
+                Directory.CreateDirectory(snapshotDir);
+            }
+
+            await WriteAllTextCompatAsync(
+                snapshotPath,
+                JsonSerializer.Serialize(benchmark, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+
+            Console.WriteLine($"Benchmark baseline snapshot saved: {snapshotPath}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.Benchmark.CompareSnapshotPath))
+        {
+            var comparePath = _options.Benchmark.CompareSnapshotPath!;
+            if (!File.Exists(comparePath))
+            {
+                Console.WriteLine($"Benchmark compare snapshot not found: {comparePath}");
+                return;
+            }
+
+            var baselineJson = await ReadAllTextCompatAsync(comparePath, cancellationToken);
+            var baseline = JsonSerializer.Deserialize<BenchmarkSnapshot>(baselineJson);
+            if (baseline is null)
+            {
+                throw new InvalidOperationException($"Failed to parse benchmark compare snapshot: {comparePath}");
+            }
+
+            var diffs = GetOutputDiffs(baseline.OutputDigest, benchmark.OutputDigest).ToList();
+            if (diffs.Count == 0)
+            {
+                Console.WriteLine("Benchmark parity check PASSED (no output digest differences).");
+                return;
+            }
+
+            var message = "Benchmark parity check FAILED:" + Environment.NewLine + string.Join(Environment.NewLine, diffs.Select(d => " - " + d));
+            throw new InvalidOperationException(message);
+        }
+    }
+
+    private BenchmarkSnapshot BuildBenchmarkSnapshot(
+        IReadOnlyList<PlateDemandRecord> plateDemands,
+        IReadOnlyList<UnifiedItem> unified,
+        IReadOnlyList<SemiFinishedTrace> semiFinished,
+        ProcessingStats stats,
+        TimingCollector timing,
+        long runtimeMs)
+    {
+        var outputDigest = new OutputDigest
+        {
+            Plates = plateDemands
+                .Select(p => $"{p.Track}|{p.OrderNumber}|{p.Material}|{p.Quantity}|{p.StartDate:yyyy-MM-dd}")
+                .OrderBy(v => v, StringComparer.Ordinal)
+                .ToList(),
+            Unified = unified
+                .Select(u => $"{u.OrderNumber}|{u.PlateMaterial}|{u.ComponentMaterial}|{u.ComponentDescription}|{u.Category}|{u.RequiredQty}")
+                .OrderBy(v => v, StringComparer.Ordinal)
+                .ToList(),
+            SemiFinished = semiFinished
+                .Select(s => $"{s.PlateOrder}|{s.PlateMaterial}|{s.Category}|{s.SemiMaterial}|{s.SemiOrder}|{s.AfruYieldDelta}")
+                .OrderBy(v => v, StringComparer.Ordinal)
+                .ToList()
+        };
+
+        return new BenchmarkSnapshot
+        {
+            GeneratedAtUtc = DateTime.UtcNow,
+            RuntimeMs = runtimeMs,
+            Plant = _options.Plant,
+            OrderFrom = _options.OrderFrom,
+            SchedulerCode = _options.SchedulerCode,
+            PlateMaterialFrom = _options.PlateMaterialFrom,
+            PlateMaterialTo = _options.PlateMaterialTo,
+            Stats = stats,
+            JobTiming = timing.GetEntries(),
+            SapClientTimingReport = (_sapClient as SapDllSapClient)?.BuildDetailedTimingReport() ?? string.Empty,
+            OutputDigest = outputDigest
+        };
+    }
+
+    private static IEnumerable<string> GetOutputDiffs(OutputDigest baseline, OutputDigest current)
+    {
+        foreach (var diff in GetListDiff("Plates", baseline.Plates, current.Plates))
+        {
+            yield return diff;
+        }
+
+        foreach (var diff in GetListDiff("Unified", baseline.Unified, current.Unified))
+        {
+            yield return diff;
+        }
+
+        foreach (var diff in GetListDiff("SemiFinished", baseline.SemiFinished, current.SemiFinished))
+        {
+            yield return diff;
+        }
+    }
+
+    private static IEnumerable<string> GetListDiff(string name, IReadOnlyList<string> baseline, IReadOnlyList<string> current)
+    {
+        if (baseline.Count != current.Count)
+        {
+            yield return $"{name} count mismatch: baseline={baseline.Count}, current={current.Count}";
+        }
+
+        var max = Math.Min(baseline.Count, current.Count);
+        for (var i = 0; i < max; i++)
+        {
+            if (string.Equals(baseline[i], current[i], StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            yield return $"{name} first mismatch at index {i}: baseline='{baseline[i]}', current='{current[i]}'";
+            yield break;
+        }
+    }
+
+    private static async Task<T> TimedSapCallAsync<T>(
+        TimingCollector collector,
+        string step,
+        SemaphoreSlim sapCallSemaphore,
+        CancellationToken cancellationToken,
+        Func<Task<T>> action)
+    {
+        await sapCallSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await TimedAsync(collector, step, action).ConfigureAwait(false);
+        }
+        finally
+        {
+            sapCallSemaphore.Release();
+        }
+    }
 
     private static async Task<T> TimedAsync<T>(TimingCollector collector, string step, Func<Task<T>> action)
     {
@@ -437,6 +815,27 @@ public sealed class PrenosJob
             }
         }
 
+        public List<TimingEntry> GetEntries()
+        {
+            List<KeyValuePair<string, Item>> entries;
+            lock (_sync)
+            {
+                entries = _map.ToList();
+            }
+
+            return entries
+                .OrderByDescending(e => e.Value.TotalMs)
+                .Select(e => new TimingEntry
+                {
+                    Step = e.Key,
+                    Calls = e.Value.Count,
+                    TotalMs = e.Value.TotalMs,
+                    MaxMs = e.Value.MaxMs,
+                    AvgMs = e.Value.Count == 0 ? 0 : (double)e.Value.TotalMs / e.Value.Count
+                })
+                .ToList();
+        }
+
         public string ToReportText()
         {
             var sb = new StringBuilder();
@@ -462,6 +861,38 @@ public sealed class PrenosJob
         }
     }
 
+
+
+    private sealed class BenchmarkSnapshot
+    {
+        public DateTime GeneratedAtUtc { get; set; }
+        public long RuntimeMs { get; set; }
+        public string Plant { get; set; } = string.Empty;
+        public string OrderFrom { get; set; } = string.Empty;
+        public string SchedulerCode { get; set; } = string.Empty;
+        public string PlateMaterialFrom { get; set; } = string.Empty;
+        public string PlateMaterialTo { get; set; } = string.Empty;
+        public ProcessingStats Stats { get; set; } = new ProcessingStats();
+        public List<TimingEntry> JobTiming { get; set; } = new List<TimingEntry>();
+        public string SapClientTimingReport { get; set; } = string.Empty;
+        public OutputDigest OutputDigest { get; set; } = new OutputDigest();
+    }
+
+    private sealed class OutputDigest
+    {
+        public List<string> Plates { get; set; } = new List<string>();
+        public List<string> Unified { get; set; } = new List<string>();
+        public List<string> SemiFinished { get; set; } = new List<string>();
+    }
+
+    private sealed class TimingEntry
+    {
+        public string Step { get; set; } = string.Empty;
+        public long Calls { get; set; }
+        public long TotalMs { get; set; }
+        public long MaxMs { get; set; }
+        public double AvgMs { get; set; }
+    }
 
     private sealed class ProgressStatus
     {
@@ -574,6 +1005,15 @@ public sealed class PrenosJob
         {
             cancellationToken.ThrowIfCancellationRequested();
             File.WriteAllText(path, content);
+        }, cancellationToken);
+    }
+
+    private static Task<string> ReadAllTextCompatAsync(string path, CancellationToken cancellationToken)
+    {
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return File.ReadAllText(path);
         }, cancellationToken);
     }
 
