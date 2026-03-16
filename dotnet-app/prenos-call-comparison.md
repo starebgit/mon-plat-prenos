@@ -146,3 +146,68 @@ A 6x slowdown is very plausible when:
 - and each call carries moderate per-call managed overhead.
 
 The key is to first match **active** Delphi behavior (`transfer.pas`) exactly, then optimize.
+
+---
+
+## 10) Recommended delivery strategy: step-by-step, not all-at-once
+
+Short answer: **do it step-by-step with hard checkpoints**. A big-bang rewrite will make it hard to prove parity and very hard to debug SAP-side effects.
+
+### Phase 0 — Freeze a parity baseline (1–2 days)
+
+1. Lock one reproducible comparison window (same `orderFrom`, same date, same plant/scheduler).
+2. Capture Delphi outputs and key counters as the reference snapshot.
+3. Add mandatory run report in .NET with:
+   - total orders fetched,
+   - RFC call counts per function,
+   - unique semiproduct material counts per category,
+   - rows written per output category.
+
+**Exit criteria:** same input window is rerunnable and measured in both implementations.
+
+### Phase 1 — Business parity before optimization (highest impact)
+
+Implement only the semantic differences:
+
+1. Add material-level dedup/memoization equivalent to Delphi `Preverisam(...)` behavior.
+2. Align Protektor/Sponka/Obroc branch behavior with active Delphi:
+   - if parity target is strict transfer behavior, do not run AFRU there.
+3. Add Delphi-like suborder pruning before AFRU work:
+   - status filter (`TEHZ`/`ZAKL` where relevant),
+   - date/window cutoff.
+
+**Exit criteria:**
+- output row counts are within agreed tolerance to Delphi (ideally exact for controlled window),
+- RFC count drops materially versus current .NET run.
+
+### Phase 2 — Reliability hardening (do before speed tuning)
+
+1. Add retry policy for transient RFC failures (bounded retries + jitter).
+2. Add per-function timeout configuration.
+3. Add idempotent run markers (run id, deterministic output names, safe rerun behavior).
+4. Add structured logging for each business branch decision (why skipped/processed).
+
+**Exit criteria:** repeated runs are stable and outcomes are deterministic.
+
+### Phase 3 — Performance optimization (after parity is proven)
+
+1. Replace reflection hot path with typed NCo APIs (or precompiled delegate accessors).
+2. Keep destination/repository/function metadata cached per process lifetime.
+3. Introduce bounded concurrency only on independent calls (small SAP-safe degree, e.g., 4–8), behind config flags.
+4. Re-profile call counts + p50/p95 per RFC after each optimization.
+
+**Exit criteria:** runtime trend reaches target while preserving parity outputs.
+
+### Phase 4 — Controlled rollout
+
+1. Run shadow mode: Delphi remains source of truth, .NET runs in parallel and compares.
+2. Add automatic diff report per run (counts + key business fields).
+3. Promote .NET only after X consecutive green comparisons.
+
+**Exit criteria:** operational sign-off to switch production ownership.
+
+### Why this is better than all-at-once
+
+- You avoid mixing **logic changes** and **performance changes** in one release.
+- You can attribute wins/losses to a specific phase.
+- If a mismatch appears, rollback is surgical and fast.
