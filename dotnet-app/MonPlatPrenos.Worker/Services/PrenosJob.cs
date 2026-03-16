@@ -33,7 +33,7 @@ public sealed class PrenosJob
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
-        var timing = new TimingCollector(Math.Max(1, _options.TimingSampleLimit));
+        var timing = new TimingCollector(20);
         var operationCodes = new HashSet<string>(_options.OperationCodes, StringComparer.OrdinalIgnoreCase);
         var allRules = _options.DefaultTerms.Concat(_options.ExtraTerms).ToList();
 
@@ -195,9 +195,7 @@ public sealed class PrenosJob
 
         ClearSingleLineStatus();
         Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
-
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
-        await WriteTimingLogAsync(timing, cancellationToken);
     }
 
     private async Task ObdelajSamotAsync(
@@ -375,59 +373,10 @@ public sealed class PrenosJob
         await WriteAllTextCompatAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         await WriteAllTextCompatAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
 
-        if (_options.EnableDebugJson)
-        {
-            var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
-            await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
-        }
-
-        if (_options.EnableDebugTextDump)
-        {
-            var textPath = Path.Combine(_options.OutputDirectory, $"prenos-debug-{stamp}.txt");
-            var sb = new StringBuilder();
-            sb.AppendLine("=== PLATES ===");
-            foreach (var p in plateDemands)
-            {
-                sb.AppendLine($"{p.OrderNumber};{p.Material};Q={p.Quantity};Track={p.Track};Start={p.StartDate:yyyy-MM-dd}");
-            }
-
-            sb.AppendLine();
-            sb.AppendLine("=== UNIFIED ===");
-            foreach (var u in unified)
-            {
-                sb.AppendLine($"{u.OrderNumber};{u.Category};{u.ComponentMaterial};Req={u.RequiredQty};{u.ComponentDescription}");
-            }
-
-            sb.AppendLine();
-            sb.AppendLine("=== SEMI-FINISHED ===");
-            foreach (var s in semiFinished)
-            {
-                sb.AppendLine($"{s.PlateOrder};{s.Category};Semi={s.SemiMaterial};Order={s.SemiOrder};AFRU={s.AfruYieldDelta}");
-            }
-
-            await WriteAllTextCompatAsync(textPath, sb.ToString(), cancellationToken);
-        }
+        var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
+        await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
     }
 
-
-    private async Task WriteTimingLogAsync(TimingCollector timing, CancellationToken cancellationToken)
-    {
-        if (!_options.EnableTimingLog)
-        {
-            return;
-        }
-
-        Directory.CreateDirectory(_options.OutputDirectory);
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var path = Path.Combine(_options.OutputDirectory, $"prenos-timing-{stamp}.log");
-        var report = timing.ToReportText();
-        if (_sapClient is SapDllSapClient sapDll)
-        {
-            report += sapDll.BuildDetailedTimingReport();
-        }
-
-        await WriteAllTextCompatAsync(path, report, cancellationToken);
-    }
 
     private static async Task<T> TimedAsync<T>(TimingCollector collector, string step, Func<Task<T>> action)
     {

@@ -633,7 +633,6 @@ public sealed class SapDllSapClient : ISapClient
         {
             _loginSource = "none";
             _loginMessage = "SapLoginConnectionString is empty; DB lookup skipped.";
-            Console.WriteLine("SAP-LOGIN: SapLoginConnectionString is empty; DB lookup skipped.");
             return;
         }
 
@@ -661,7 +660,6 @@ public sealed class SapDllSapClient : ISapClient
                         {
                             _loginSource = "db";
                             _loginMessage = string.Format(CultureInfo.InvariantCulture, "No row found in table prijava for ident={0}.", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni='X'>");
-                            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: No row found in table prijava (ident={0}).", _options.SapLoginIdent.HasValue ? _options.SapLoginIdent.Value.ToString(CultureInfo.InvariantCulture) : "<default glavni=\'X\'>"));
                             return;
                         }
 
@@ -682,20 +680,17 @@ public sealed class SapDllSapClient : ISapClient
             {
                 _loginSource = "db";
                 _loginMessage = "Loaded SAP login values from table prijava.";
-                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: Loaded login from DB (sistem={0}).", _options.DestinationName));
             }
             else
             {
                 _loginSource = "db";
                 _loginMessage = "DB lookup executed, but required fields are still incomplete.";
-                Console.WriteLine("SAP-LOGIN: DB lookup ran, but required fields are still incomplete.");
             }
         }
         catch (Exception ex)
         {
             _loginSource = "db";
             _loginMessage = string.Format(CultureInfo.InvariantCulture, "DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message);
-            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "SAP-LOGIN: DB lookup failed: {0}: {1}", ex.GetType().Name, ex.Message));
         }
     }
 

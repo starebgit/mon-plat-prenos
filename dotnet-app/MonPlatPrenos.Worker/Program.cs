@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MonPlatPrenos.Worker.Services;
 
@@ -21,10 +20,6 @@ public static class Program
             {
                 config.SetBasePath(AppContext.BaseDirectory);
                 config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
-            })
-            .ConfigureLogging(logging =>
-            {
-                logging.ClearProviders();
             })
             .ConfigureServices((context, services) =>
             {
@@ -44,21 +39,6 @@ public static class Program
         {
             using (var scope = host.Services.CreateScope())
             {
-                var sapClient = scope.ServiceProvider.GetRequiredService<ISapClient>();
-                var realSap = (SapDllSapClient)sapClient;
-                var login = realSap.GetLoginPreview();
-                Console.WriteLine("RUN-ONCE LOGIN CHECK");
-                Console.WriteLine($"DestinationName: {login.DestinationName}");
-                Console.WriteLine($"AppServerHost : {login.AppServerHost}");
-                Console.WriteLine($"SystemNumber  : {login.SystemNumber}");
-                Console.WriteLine($"Client        : {login.Client}");
-                Console.WriteLine($"User          : {login.User}");
-                Console.WriteLine($"Language      : {login.Language}");
-                Console.WriteLine($"Password      : {login.PasswordMasked}");
-                Console.WriteLine($"IsComplete    : {login.IsComplete}");
-                Console.WriteLine($"LoginSource   : {login.LoginSource}");
-                Console.WriteLine($"LoginMessage  : {login.LoginMessage}");
-
                 var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
                 var runDate = TryGetDateArg(args, "--from-date");
                 Console.WriteLine($"RUN-ONCE PRENOS DAY : {(runDate.HasValue ? runDate.Value.ToString("yyyy-MM-dd") : "ALL")}");
