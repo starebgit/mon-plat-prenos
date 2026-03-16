@@ -32,12 +32,6 @@ public static class Program
                 services.AddSingleton<ISapClient>(sp =>
                 {
                     var options = sp.GetRequiredService<IOptions<PrenosOptions>>().Value;
-
-                    if (options.Sap.UseMock)
-                    {
-                        return new MockSapClient();
-                    }
-
                     return new SapDllSapClient(options.Sap);
                 });
 
@@ -51,27 +45,19 @@ public static class Program
             using (var scope = host.Services.CreateScope())
             {
                 var sapClient = scope.ServiceProvider.GetRequiredService<ISapClient>();
-
-                if (sapClient is SapDllSapClient realSap)
-                {
-                    var login = realSap.GetLoginPreview();
-                    Console.WriteLine("RUN-ONCE LOGIN CHECK");
-                    Console.WriteLine($"DestinationName: {login.DestinationName}");
-                    Console.WriteLine($"AppServerHost : {login.AppServerHost}");
-                    Console.WriteLine($"SystemNumber  : {login.SystemNumber}");
-                    Console.WriteLine($"Client        : {login.Client}");
-                    Console.WriteLine($"User          : {login.User}");
-                    Console.WriteLine($"Language      : {login.Language}");
-                    Console.WriteLine($"Password      : {login.PasswordMasked}");
-                    Console.WriteLine($"IsComplete    : {login.IsComplete}");
-                    Console.WriteLine($"LoginSource   : {login.LoginSource}");
-                    Console.WriteLine($"LoginMessage  : {login.LoginMessage}");
-                }
-                else
-                {
-                    Console.WriteLine("RUN-ONCE LOGIN CHECK");
-                    Console.WriteLine("ISapClient is MockSapClient. Set Prenos:Sap:UseMock=false to test DB login lookup.");
-                }
+                var realSap = (SapDllSapClient)sapClient;
+                var login = realSap.GetLoginPreview();
+                Console.WriteLine("RUN-ONCE LOGIN CHECK");
+                Console.WriteLine($"DestinationName: {login.DestinationName}");
+                Console.WriteLine($"AppServerHost : {login.AppServerHost}");
+                Console.WriteLine($"SystemNumber  : {login.SystemNumber}");
+                Console.WriteLine($"Client        : {login.Client}");
+                Console.WriteLine($"User          : {login.User}");
+                Console.WriteLine($"Language      : {login.Language}");
+                Console.WriteLine($"Password      : {login.PasswordMasked}");
+                Console.WriteLine($"IsComplete    : {login.IsComplete}");
+                Console.WriteLine($"LoginSource   : {login.LoginSource}");
+                Console.WriteLine($"LoginMessage  : {login.LoginMessage}");
 
                 var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
                 var runDate = TryGetDateArg(args, "--from-date");
