@@ -40,6 +40,7 @@ public sealed class WatermarkOptions
 
 public sealed class SapIntegrationOptions
 {
+    public bool UseTypedHotPath { get; set; } = true;
     public string SapDllPath { get; set; } = "sapnco.dll";
     public string SaUtilsDllPath { get; set; } = "sapnco_utils.dll";
     public string? DestinationName { get; set; }

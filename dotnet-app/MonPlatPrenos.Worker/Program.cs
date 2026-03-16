@@ -27,6 +27,7 @@ public static class Program
                 services.AddSingleton<ISapClient>(sp =>
                 {
                     var options = sp.GetRequiredService<IOptions<PrenosOptions>>().Value;
+                    options.Sap.UseTypedHotPath = options.UseTypedHotPath;
                     return new SapDllSapClient(options.Sap);
                 });
 

@@ -641,7 +641,7 @@ public sealed class PrenosJob
                 return;
             }
 
-            var baselineJson = await File.ReadAllTextAsync(comparePath, cancellationToken);
+            var baselineJson = await ReadAllTextCompatAsync(comparePath, cancellationToken);
             var baseline = JsonSerializer.Deserialize<BenchmarkSnapshot>(baselineJson);
             if (baseline is null)
             {
@@ -1005,6 +1005,15 @@ public sealed class PrenosJob
         {
             cancellationToken.ThrowIfCancellationRequested();
             File.WriteAllText(path, content);
+        }, cancellationToken);
+    }
+
+    private static Task<string> ReadAllTextCompatAsync(string path, CancellationToken cancellationToken)
+    {
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return File.ReadAllText(path);
         }, cancellationToken);
     }
 
