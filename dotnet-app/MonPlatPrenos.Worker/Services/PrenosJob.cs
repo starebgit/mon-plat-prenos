@@ -56,6 +56,7 @@ public sealed class PrenosJob
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
         var semiFinished = new List<SemiFinishedTrace>();
+        var processedSemiMaterials = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         for (var orderIndex = 0; orderIndex < orders.Count; orderIndex++)
         {
@@ -179,13 +180,13 @@ public sealed class PrenosJob
 
                     if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ObdelajSamotAsync(order, component, semiFinished, unified, stats, timing, cancellationToken);
+                        await ObdelajSamotAsync(order, component, semiFinished, unified, stats, timing, processedSemiMaterials, cancellationToken);
                     }
                     else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
                              || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
                              || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ObdelajPolIzdAsync(order, component, rule.Name, semiFinished, unified, stats, timing, cancellationToken, depth: 0);
+                        await ObdelajPolIzdAsync(order, component, rule.Name, semiFinished, unified, stats, timing, processedSemiMaterials, cancellationToken, depth: 0);
                     }
 
                     break;
@@ -205,13 +206,14 @@ public sealed class PrenosJob
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
         TimingCollector timing,
+        IDictionary<string, HashSet<string>> processedSemiMaterials,
         CancellationToken cancellationToken)
     {
-        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, cancellationToken, depth: 0);
+        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, processedSemiMaterials, cancellationToken, depth: 0);
 
         foreach (var samotOrder in samotOrders)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, processedSemiMaterials, cancellationToken);
         }
     }
 
@@ -223,6 +225,7 @@ public sealed class PrenosJob
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
         TimingCollector timing,
+        IDictionary<string, HashSet<string>> processedSemiMaterials,
         CancellationToken cancellationToken,
         int depth)
     {
@@ -230,6 +233,15 @@ public sealed class PrenosJob
         {
             return Array.Empty<SapOrderHeader>();
         }
+
+        if (IsAlreadyProcessed(category, semiComponent.Material, processedSemiMaterials))
+        {
+            return Array.Empty<SapOrderHeader>();
+        }
+
+        var shouldRunAfru = !_options.StrictTransferParity || category.Equals("Samot", StringComparison.OrdinalIgnoreCase);
+        var lookbackDays = Math.Max(0, _options.SubOrderLookbackDays);
+        var minDate = DateTime.Today.AddDays(-lookbackDays);
 
         var subOrders = await TimedAsync(
             timing,
@@ -252,9 +264,19 @@ public sealed class PrenosJob
                     cancellationToken));
         }
 
-        foreach (var subOrder in subOrders)
+        var filteredSubOrders = subOrders
+            .Where(subOrder => !string.Equals(subOrder.Status, "TEHZ", StringComparison.OrdinalIgnoreCase)
+                               && !string.Equals(subOrder.Status, "ZAKL", StringComparison.OrdinalIgnoreCase))
+            .Where(subOrder => subOrder.StartDate.Date >= minDate)
+            .ToList();
+
+        foreach (var subOrder in filteredSubOrders)
         {
-            var afruDelta = await TimedAsync(timing, "GetAfruYieldDelta", () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken));
+            var afruDelta = 0;
+            if (shouldRunAfru)
+            {
+                afruDelta = await TimedAsync(timing, "GetAfruYieldDelta", () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
+            }
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
@@ -270,7 +292,7 @@ public sealed class PrenosJob
                 plateOrder.OrderNumber,
                 FormatMaterialLikeDelphi(plateOrder.Material),
                 FormatMaterialLikeDelphi(semiComponent.Material),
-                $"AFRU delta for {subOrder.OrderNumber}",
+                shouldRunAfru ? $"AFRU delta for {subOrder.OrderNumber}" : $"Parity mode (no AFRU) for {subOrder.OrderNumber}",
                 $"{category}_AFRU",
                 afruDelta,
                 DateTime.UtcNow));
@@ -278,7 +300,31 @@ public sealed class PrenosJob
             stats.AddCategoryHit($"{category}_AFRU");
         }
 
-        return subOrders;
+        return filteredSubOrders;
+    }
+
+    private static bool IsAlreadyProcessed(string category, string material, IDictionary<string, HashSet<string>> processedSemiMaterials)
+    {
+        var normalizedCategory = category?.Trim() ?? string.Empty;
+        var normalizedMaterial = FormatMaterialLikeDelphi(material);
+        if (string.IsNullOrWhiteSpace(normalizedMaterial))
+        {
+            return true;
+        }
+
+        if (!processedSemiMaterials.TryGetValue(normalizedCategory, out var processedByCategory))
+        {
+            processedByCategory = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            processedSemiMaterials[normalizedCategory] = processedByCategory;
+        }
+
+        if (processedByCategory.Contains(normalizedMaterial))
+        {
+            return true;
+        }
+
+        processedByCategory.Add(normalizedMaterial);
+        return false;
     }
 
     private async Task ObdelajUliAsync(
@@ -289,6 +335,7 @@ public sealed class PrenosJob
         ICollection<UnifiedItem> unified,
         ProcessingStats stats,
         TimingCollector timing,
+        IDictionary<string, HashSet<string>> processedSemiMaterials,
         CancellationToken cancellationToken)
     {
         var components = await TimedAsync(timing, "GetComponents", () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
@@ -298,7 +345,7 @@ public sealed class PrenosJob
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, cancellationToken, depth: 1);
+                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, processedSemiMaterials, cancellationToken, depth: 1);
                 continue;
             }
 
