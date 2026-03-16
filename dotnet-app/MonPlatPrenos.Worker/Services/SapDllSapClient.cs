@@ -280,7 +280,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectsFlag(function, 4, "OPERATION", "OPERATIONS");
+        SetOrderObjectsByIndex(function, 4);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -376,7 +376,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectsFlag(function, 3, "COMPONENT", "COMPONENTS");
+        SetOrderObjectsByIndex(function, 3);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -842,7 +842,7 @@ public sealed class SapDllSapClient : ISapClient
         setValue.Invoke(function, new object[] { importName, value });
     }
 
-    private static void SetOrderObjectsFlag(object function, int preferredIndex, params string[] fieldNames)
+    private static void SetOrderObjectsByIndex(object function, int index)
     {
         var functionType = function.GetType();
         var getStructure = GetStructureMethodCache.GetOrAdd(functionType, t => t.GetMethod("GetStructure", new[] { typeof(string) }))
@@ -852,50 +852,21 @@ public sealed class SapDllSapClient : ISapClient
                        ?? throw new InvalidOperationException("ORDER_OBJECTS structure is null.");
 
         var structureType = structure.GetType();
-        var setValueByIndex = SetValueIndexObjectCache.GetOrAdd(structureType, t => t.GetMethod("SetValue", new[] { typeof(int), typeof(object) }));
-        if (setValueByIndex is not null)
-        {
-            foreach (var index in new[] { preferredIndex, preferredIndex - 1 })
-            {
-                if (index < 0)
-                {
-                    continue;
-                }
+        var setValueByIndex = SetValueIndexObjectCache.GetOrAdd(structureType, t => t.GetMethod("SetValue", new[] { typeof(int), typeof(object) }))
+                              ?? throw new InvalidOperationException("Could not find structure.SetValue(int, object) for ORDER_OBJECTS strict index mode.");
 
-                if (TryInvoke(() => setValueByIndex.Invoke(structure, new object[] { index, "X" })))
-                {
-                    return;
-                }
-            }
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"ORDER_OBJECTS index must be non-negative, got {index}.");
         }
 
-        var setValueByName = SetValueNameObjectCache.GetOrAdd(structureType, t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }));
-        if (setValueByName is null)
-        {
-            throw new InvalidOperationException("Could not find structure.SetValue(string, object) or structure.SetValue(int, object).");
-        }
-
-        foreach (var fieldName in fieldNames)
-        {
-            if (TryInvoke(() => setValueByName.Invoke(structure, new object[] { fieldName, "X" })))
-            {
-                return;
-            }
-        }
-
-        throw new InvalidOperationException($"Could not set ORDER_OBJECTS selection. Tried indexes {preferredIndex}/{preferredIndex - 1} and fields: {string.Join(", ", fieldNames)}.");
-    }
-
-    private static bool TryInvoke(Action invoke)
-    {
         try
         {
-            invoke();
-            return true;
+            setValueByIndex.Invoke(structure, new object[] { index, "X" });
         }
-        catch (TargetInvocationException)
+        catch (TargetInvocationException ex)
         {
-            return false;
+            throw new InvalidOperationException($"Could not set ORDER_OBJECTS at strict index {index}.", ex);
         }
     }
 
