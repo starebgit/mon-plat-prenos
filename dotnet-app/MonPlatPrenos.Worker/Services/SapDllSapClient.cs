@@ -87,8 +87,8 @@ public sealed class SapDllSapClient : ISapClient
     {
         _options = options;
         _fieldMap = options.FieldMap ?? new SapFieldMapOptions();
-        _sapDllFullPath = ResolveSapPath(options.SapDllPath, "sapnco.dll");
-        _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath, "sapnco_utils.dll");
+        _sapDllFullPath = ResolveSapPath(options.SapDllPath);
+        _saUtilsDllFullPath = ResolveSapPath(options.SaUtilsDllPath);
 
         if (!File.Exists(_sapDllFullPath))
         {
@@ -187,7 +187,7 @@ public sealed class SapDllSapClient : ISapClient
 
 
 
-    private static string ResolveSapPath(string configuredPath, string defaultFileName)
+    private static string ResolveSapPath(string configuredPath)
     {
         if (Path.IsPathRooted(configuredPath))
         {
@@ -195,25 +195,7 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         var baseDir = AppContext.BaseDirectory;
-        var primary = Path.GetFullPath(Path.Combine(baseDir, configuredPath));
-        if (File.Exists(primary))
-        {
-            return primary;
-        }
-
-        var fallbackInRoot = Path.GetFullPath(Path.Combine(baseDir, defaultFileName));
-        if (File.Exists(fallbackInRoot))
-        {
-            return fallbackInRoot;
-        }
-
-        var fallbackInLib = Path.GetFullPath(Path.Combine(baseDir, "lib", defaultFileName));
-        if (File.Exists(fallbackInLib))
-        {
-            return fallbackInLib;
-        }
-
-        return primary;
+        return Path.GetFullPath(Path.Combine(baseDir, configuredPath));
     }
 
     public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, CancellationToken cancellationToken)
