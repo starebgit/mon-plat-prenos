@@ -152,6 +152,34 @@ dotnet run -- --run-once
 
 With parity mode enabled, `--from-date` is ignored and the fixed date is always used.
 
+## Single parity benchmark mode (recommended baseline mode)
+
+If you want one switch that locks inputs and always emits benchmark artifacts, use:
+
+```json
+"Prenos": {
+  "ParityBenchmarkMode": {
+    "Enabled": true,
+    "FixedFromDate": "2026-03-11",
+    "FixedOrderFrom": "000005223286"
+  }
+}
+```
+
+When `ParityBenchmarkMode.Enabled=true`, the worker automatically:
+- locks `fromDate` and `orderFrom` to fixed values,
+- forces benchmark snapshot generation even if `Prenos:Benchmark:Enabled=false`,
+- disables watermark movement (same behavior as parity mode),
+- writes an execution summary log: `output/parity-benchmark-run-*.log`.
+
+Run it directly:
+
+```bash
+dotnet run -- --parity-benchmark
+```
+
+The worker now also prints the **absolute output directory** at startup and always writes a fetched-code log file (even when no orders are returned, the file contains `# NO_ORDERS_FETCHED`).
+
 `--run-once` does two steps:
 
 1. login/config check (loads SAP settings from direct `Prenos:Sap` values or DB lookup and prints `RUN-ONCE LOGIN CHECK`)

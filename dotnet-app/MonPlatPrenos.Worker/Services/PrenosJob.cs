@@ -27,11 +27,17 @@ public sealed class PrenosJob
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
         var runSw = Stopwatch.StartNew();
-        var effectiveFromDate = ResolveFromDate(forDate);
-        var parityModeEnabled = _options.ParityMode.Enabled;
+        var parityBenchmarkModeEnabled = _options.ParityBenchmarkMode.Enabled;
+        var parityModeEnabled = _options.ParityMode.Enabled || parityBenchmarkModeEnabled;
+        var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
+        var outputDirectory = GetOutputDirectoryPath();
+        var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
+        Console.WriteLine($"Run mode: {(parityBenchmarkModeEnabled ? "PARITY-BENCHMARK" : parityModeEnabled ? "PARITY" : "NORMAL")}");
+        Console.WriteLine($"Output directory: {outputDirectory}");
+        Console.WriteLine($"Effective fromDate: {(effectiveFromDate.HasValue ? effectiveFromDate.Value.ToString("yyyy-MM-dd") : "ALL")}, orderFrom: {orderFrom}");
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
@@ -94,7 +100,7 @@ public sealed class PrenosJob
         Console.WriteLine($"Processed {orders.Count} orders. Plates={plateDemands.Count}, Unified={unified.Count}, SemiFinished={semiFinished.Count}");
         await WriteOutputAsync(plateDemands, unified, semiFinished, cancellationToken);
 
-        if (_options.Benchmark.Enabled)
+        if (benchmarkEnabled)
         {
             await WriteBenchmarkArtifactsAsync(
                 plateDemands,
@@ -108,29 +114,33 @@ public sealed class PrenosJob
                 cancellationToken);
         }
 
+        if (parityBenchmarkModeEnabled)
+        {
+            await WriteParityBenchmarkRunLogAsync(runtimeMs, effectiveFromDate, orderFrom, plateDemands.Count, unified.Count, semiFinished.Count, cancellationToken);
+        }
+
         if (!parityModeEnabled)
         {
             TryPersistOrderFromWatermark(maxFetchedOrderNumber);
         }
     }
 
-    private DateTime? ResolveFromDate(DateTime? requestedFromDate)
+    private DateTime? ResolveFromDate(DateTime? requestedFromDate, bool parityModeEnabled)
     {
-        if (!_options.ParityMode.Enabled)
+        if (!parityModeEnabled)
         {
             return requestedFromDate;
         }
 
-        var fixedFromDate = _options.ParityMode.FixedFromDate?.Trim();
-        var fixedOrderFrom = _options.ParityMode.FixedOrderFrom?.Trim();
+        var (fixedFromDate, fixedOrderFrom, sourceKey) = GetParityLockValues();
         if (string.IsNullOrWhiteSpace(fixedFromDate) || string.IsNullOrWhiteSpace(fixedOrderFrom))
         {
-            throw new InvalidOperationException("Parity mode requires both Prenos:ParityMode:FixedFromDate and Prenos:ParityMode:FixedOrderFrom to be set.");
+            throw new InvalidOperationException($"{sourceKey} requires both FixedFromDate and FixedOrderFrom to be set.");
         }
 
         if (!DateTime.TryParse(fixedFromDate, out var parsed))
         {
-            throw new InvalidOperationException($"Parity mode fixed date is invalid: '{fixedFromDate}'. Set Prenos:ParityMode:FixedFromDate to a valid date string.");
+            throw new InvalidOperationException($"Parity mode fixed date is invalid: '{fixedFromDate}'. Set {sourceKey}:FixedFromDate to a valid date string.");
         }
 
         return parsed.Date;
@@ -140,7 +150,13 @@ public sealed class PrenosJob
     {
         if (parityModeEnabled)
         {
-            return _options.ParityMode.FixedOrderFrom!.Trim();
+            var (_, fixedOrderFrom, sourceKey) = GetParityLockValues();
+            if (string.IsNullOrWhiteSpace(fixedOrderFrom))
+            {
+                throw new InvalidOperationException($"{sourceKey}:FixedOrderFrom must be set when parity mode is enabled.");
+            }
+
+            return fixedOrderFrom.Trim();
         }
         var configured = _options.OrderFrom?.Trim() ?? string.Empty;
         if (!_options.Watermark.Enabled)
@@ -166,7 +182,7 @@ public sealed class PrenosJob
     {
         try
         {
-            var path = _options.Watermark.FilePath;
+            var path = ResolvePathFromCurrentDirectory(_options.Watermark.FilePath);
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
                 return null;
@@ -190,7 +206,7 @@ public sealed class PrenosJob
 
         try
         {
-            var path = _options.Watermark.FilePath;
+            var path = ResolvePathFromCurrentDirectory(_options.Watermark.FilePath);
             if (string.IsNullOrWhiteSpace(path))
             {
                 return;
@@ -611,27 +627,24 @@ public sealed class PrenosJob
         IReadOnlyList<SemiFinishedTrace> semiFinished,
         CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(_options.OutputDirectory);
+        var outputDirectory = GetOutputDirectoryPath();
+        Directory.CreateDirectory(outputDirectory);
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var platePath = Path.Combine(_options.OutputDirectory, $"plates-{stamp}.json");
-        var unifiedPath = Path.Combine(_options.OutputDirectory, $"unified-{stamp}.json");
+        var platePath = Path.Combine(outputDirectory, $"plates-{stamp}.json");
+        var unifiedPath = Path.Combine(outputDirectory, $"unified-{stamp}.json");
 
         await WriteAllTextCompatAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         await WriteAllTextCompatAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
 
-        var semiPath = Path.Combine(_options.OutputDirectory, $"semi-finished-{stamp}.json");
+        var semiPath = Path.Combine(outputDirectory, $"semi-finished-{stamp}.json");
         await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
     }
 
     private async Task WriteFetchedCodesLogAsync(IReadOnlyList<SapOrderHeader> orders, CancellationToken cancellationToken)
     {
-        if (orders.Count == 0)
-        {
-            return;
-        }
-
-        Directory.CreateDirectory(_options.OutputDirectory);
+        var outputDirectory = GetOutputDirectoryPath();
+        Directory.CreateDirectory(outputDirectory);
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var filePattern = string.IsNullOrWhiteSpace(_options.FetchedCodeLogFilePattern)
@@ -640,12 +653,16 @@ public sealed class PrenosJob
         var fileName = filePattern.Replace("{timestamp}", stamp);
         var path = Path.IsPathRooted(fileName)
             ? fileName
-            : Path.Combine(_options.OutputDirectory, fileName);
+            : Path.Combine(outputDirectory, fileName);
 
         var lines = orders
             .OrderBy(o => o.OrderNumber, StringComparer.Ordinal)
             .Select(o => $"{o.OrderNumber}|{FormatMaterialLikeDelphi(o.Material)}|{o.Status}|{o.StartDate:yyyy-MM-dd}")
             .ToList();
+        if (lines.Count == 0)
+        {
+            lines.Add("# NO_ORDERS_FETCHED");
+        }
 
         await WriteAllTextCompatAsync(path, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
         Console.WriteLine($"Fetched code log written: {path}");
@@ -664,10 +681,11 @@ public sealed class PrenosJob
         string effectiveOrderFrom,
         CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(_options.OutputDirectory);
+        var outputDirectory = GetOutputDirectoryPath();
+        Directory.CreateDirectory(outputDirectory);
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var benchmarkPath = Path.Combine(_options.OutputDirectory, $"benchmark-{stamp}.json");
+        var benchmarkPath = Path.Combine(outputDirectory, $"benchmark-{stamp}.json");
         var benchmark = BuildBenchmarkSnapshot(plateDemands, unified, semiFinished, stats, timing, runtimeMs, effectiveFromDate, effectiveOrderFrom);
 
         await WriteAllTextCompatAsync(
@@ -720,6 +738,70 @@ public sealed class PrenosJob
             var message = "Benchmark parity check FAILED:" + Environment.NewLine + string.Join(Environment.NewLine, diffs.Select(d => " - " + d));
             throw new InvalidOperationException(message);
         }
+    }
+
+    private async Task WriteParityBenchmarkRunLogAsync(
+        long runtimeMs,
+        DateTime? effectiveFromDate,
+        string effectiveOrderFrom,
+        int platesCount,
+        int unifiedCount,
+        int semiFinishedCount,
+        CancellationToken cancellationToken)
+    {
+        var outputDirectory = GetOutputDirectoryPath();
+        Directory.CreateDirectory(outputDirectory);
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var path = Path.Combine(outputDirectory, $"parity-benchmark-run-{stamp}.log");
+        var lines = new[]
+        {
+            "MODE=PARITY_BENCHMARK",
+            $"UTC={DateTime.UtcNow:O}",
+            $"FROM_DATE={(effectiveFromDate.HasValue ? effectiveFromDate.Value.ToString("yyyy-MM-dd") : "ALL")}",
+            $"ORDER_FROM={effectiveOrderFrom}",
+            $"RUNTIME_MS={runtimeMs}",
+            $"PLATES={platesCount}",
+            $"UNIFIED={unifiedCount}",
+            $"SEMI_FINISHED={semiFinishedCount}",
+            $"OUTPUT_DIR={outputDirectory}"
+        };
+
+        await WriteAllTextCompatAsync(path, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
+        Console.WriteLine($"Parity benchmark run log written: {path}");
+    }
+
+    private (string? FixedFromDate, string? FixedOrderFrom, string SourceKey) GetParityLockValues()
+    {
+        if (_options.ParityBenchmarkMode.Enabled)
+        {
+            return (
+                _options.ParityBenchmarkMode.FixedFromDate?.Trim(),
+                _options.ParityBenchmarkMode.FixedOrderFrom?.Trim(),
+                "Prenos:ParityBenchmarkMode");
+        }
+
+        return (
+            _options.ParityMode.FixedFromDate?.Trim(),
+            _options.ParityMode.FixedOrderFrom?.Trim(),
+            "Prenos:ParityMode");
+    }
+
+    private string GetOutputDirectoryPath()
+        => ResolvePathFromCurrentDirectory(_options.OutputDirectory);
+
+    private static string ResolvePathFromCurrentDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return Directory.GetCurrentDirectory();
+        }
+
+        if (Path.IsPathRooted(path))
+        {
+            return path;
+        }
+
+        return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), path));
     }
 
     private BenchmarkSnapshot BuildBenchmarkSnapshot(
