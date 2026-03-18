@@ -317,6 +317,13 @@ public sealed class PrenosJob
 
         stats.OperationRowsRead += operations.Count;
         stats.ValidOperations += validOperations.Count;
+        if (validOperations.Count == 0)
+        {
+            // Delphi parity: plate demand rows are only produced from qualifying operations.
+            // If there are no valid operations, skip the order before missing-qty/component logic.
+            stats.SkippedByNoValidOperations++;
+            return result;
+        }
 
         var totalYield = 0;
         var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
@@ -574,6 +581,7 @@ public sealed class PrenosJob
         public int OrdersAfterCoreFilters { get; set; }
         public int OperationRowsRead { get; set; }
         public int ValidOperations { get; set; }
+        public int SkippedByNoValidOperations { get; set; }
         public int ConfirmationRowsRead { get; set; }
         public int SkippedByMissingQty { get; set; }
         public int ComponentRowsRead { get; set; }
@@ -603,6 +611,7 @@ public sealed class PrenosJob
             OrdersAfterCoreFilters += other.OrdersAfterCoreFilters;
             OperationRowsRead += other.OperationRowsRead;
             ValidOperations += other.ValidOperations;
+            SkippedByNoValidOperations += other.SkippedByNoValidOperations;
             ConfirmationRowsRead += other.ConfirmationRowsRead;
             SkippedByMissingQty += other.SkippedByMissingQty;
             ComponentRowsRead += other.ComponentRowsRead;
