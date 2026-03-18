@@ -22,8 +22,16 @@ public sealed class PrenosOptions
     public bool UseTypedHotPath { get; set; } = true;
     public bool EnableSemiFinishedExpansion { get; set; } = true;
     public WatermarkOptions Watermark { get; set; } = new WatermarkOptions();
+    public PrenosParityModeOptions ParityMode { get; set; } = new PrenosParityModeOptions();
     public string FetchedCodeLogFilePattern { get; set; } = "fetched-codes-{timestamp}.txt";
     public SapIntegrationOptions Sap { get; set; } = new SapIntegrationOptions();
+}
+
+public sealed class PrenosParityModeOptions
+{
+    public bool Enabled { get; set; }
+    public string? FixedFromDate { get; set; }
+    public string? FixedOrderFrom { get; set; }
 }
 
 public sealed class BenchmarkOptions

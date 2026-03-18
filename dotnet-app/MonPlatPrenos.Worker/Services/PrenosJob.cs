@@ -27,9 +27,11 @@ public sealed class PrenosJob
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
         var runSw = Stopwatch.StartNew();
+        var effectiveFromDate = ResolveFromDate(forDate);
+        var parityModeEnabled = _options.ParityMode.Enabled;
 
         var plant = _options.Plant;
-        var orderFrom = ResolveOrderFrom();
+        var orderFrom = ResolveOrderFrom(parityModeEnabled);
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
@@ -63,7 +65,7 @@ public sealed class PrenosJob
             order,
             orderIndex,
             orders.Count,
-            forDate,
+            effectiveFromDate,
             operationCodes,
             allRules,
             timing,
@@ -101,14 +103,45 @@ public sealed class PrenosJob
                 stats,
                 timing,
                 runtimeMs,
+                effectiveFromDate,
+                orderFrom,
                 cancellationToken);
         }
 
-        TryPersistOrderFromWatermark(maxFetchedOrderNumber);
+        if (!parityModeEnabled)
+        {
+            TryPersistOrderFromWatermark(maxFetchedOrderNumber);
+        }
     }
 
-    private string ResolveOrderFrom()
+    private DateTime? ResolveFromDate(DateTime? requestedFromDate)
     {
+        if (!_options.ParityMode.Enabled)
+        {
+            return requestedFromDate;
+        }
+
+        var fixedFromDate = _options.ParityMode.FixedFromDate?.Trim();
+        var fixedOrderFrom = _options.ParityMode.FixedOrderFrom?.Trim();
+        if (string.IsNullOrWhiteSpace(fixedFromDate) || string.IsNullOrWhiteSpace(fixedOrderFrom))
+        {
+            throw new InvalidOperationException("Parity mode requires both Prenos:ParityMode:FixedFromDate and Prenos:ParityMode:FixedOrderFrom to be set.");
+        }
+
+        if (!DateTime.TryParse(fixedFromDate, out var parsed))
+        {
+            throw new InvalidOperationException($"Parity mode fixed date is invalid: '{fixedFromDate}'. Set Prenos:ParityMode:FixedFromDate to a valid date string.");
+        }
+
+        return parsed.Date;
+    }
+
+    private string ResolveOrderFrom(bool parityModeEnabled)
+    {
+        if (parityModeEnabled)
+        {
+            return _options.ParityMode.FixedOrderFrom!.Trim();
+        }
         var configured = _options.OrderFrom?.Trim() ?? string.Empty;
         if (!_options.Watermark.Enabled)
         {
@@ -627,13 +660,15 @@ public sealed class PrenosJob
         ProcessingStats stats,
         TimingCollector timing,
         long runtimeMs,
+        DateTime? effectiveFromDate,
+        string effectiveOrderFrom,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_options.OutputDirectory);
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var benchmarkPath = Path.Combine(_options.OutputDirectory, $"benchmark-{stamp}.json");
-        var benchmark = BuildBenchmarkSnapshot(plateDemands, unified, semiFinished, stats, timing, runtimeMs);
+        var benchmark = BuildBenchmarkSnapshot(plateDemands, unified, semiFinished, stats, timing, runtimeMs, effectiveFromDate, effectiveOrderFrom);
 
         await WriteAllTextCompatAsync(
             benchmarkPath,
@@ -693,7 +728,9 @@ public sealed class PrenosJob
         IReadOnlyList<SemiFinishedTrace> semiFinished,
         ProcessingStats stats,
         TimingCollector timing,
-        long runtimeMs)
+        long runtimeMs,
+        DateTime? effectiveFromDate,
+        string effectiveOrderFrom)
     {
         var outputDigest = new OutputDigest
         {
@@ -716,7 +753,11 @@ public sealed class PrenosJob
             GeneratedAtUtc = DateTime.UtcNow,
             RuntimeMs = runtimeMs,
             Plant = _options.Plant,
-            OrderFrom = _options.OrderFrom,
+            FromDate = effectiveFromDate?.ToString("yyyy-MM-dd"),
+            OrderFrom = effectiveOrderFrom,
+            OrderConcurrency = Math.Max(1, _options.OrderConcurrency),
+            MaxSapCallsInFlight = Math.Max(1, _options.MaxSapCallsInFlight),
+            ConfirmationConcurrency = Math.Max(1, _options.ConfirmationConcurrency),
             SchedulerCode = _options.SchedulerCode,
             PlateMaterialFrom = _options.PlateMaterialFrom,
             PlateMaterialTo = _options.PlateMaterialTo,
@@ -872,7 +913,11 @@ public sealed class PrenosJob
         public DateTime GeneratedAtUtc { get; set; }
         public long RuntimeMs { get; set; }
         public string Plant { get; set; } = string.Empty;
+        public string? FromDate { get; set; }
         public string OrderFrom { get; set; } = string.Empty;
+        public int OrderConcurrency { get; set; }
+        public int MaxSapCallsInFlight { get; set; }
+        public int ConfirmationConcurrency { get; set; }
         public string SchedulerCode { get; set; } = string.Empty;
         public string PlateMaterialFrom { get; set; } = string.Empty;
         public string PlateMaterialTo { get; set; } = string.Empty;
