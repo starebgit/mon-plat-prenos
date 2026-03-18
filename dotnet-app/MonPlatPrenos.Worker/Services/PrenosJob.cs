@@ -295,7 +295,7 @@ public sealed class PrenosJob
             return result;
         }
 
-        if (order.Status is "TEHZ" or "ZAKL")
+        if (IsTechnicallyClosedStatus(order.Status))
         {
             stats.SkippedByStatus++;
             return result;
@@ -889,6 +889,20 @@ public sealed class PrenosJob
             yield return $"{name} first mismatch at index {i}: baseline='{baseline[i]}', current='{current[i]}'";
             yield break;
         }
+    }
+
+    private static bool IsTechnicallyClosedStatus(string? status)
+    {
+        // Delphi parity: statdn := copy(tab.value(i,42),1,4) and then TEHZ/ZAKL check.
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return false;
+        }
+
+        var trimmed = status.Trim();
+        var prefix = trimmed.Length >= 4 ? trimmed.Substring(0, 4) : trimmed;
+        return string.Equals(prefix, "TEHZ", StringComparison.Ordinal)
+            || string.Equals(prefix, "ZAKL", StringComparison.Ordinal);
     }
 
     private static async Task<T> TimedSapCallAsync<T>(
