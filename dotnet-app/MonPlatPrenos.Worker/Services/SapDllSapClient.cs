@@ -257,7 +257,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlag(function, "OPERATION", 4);
+        SetOrderObjectFlag(function, "OPERATION", 4, 3);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -308,7 +308,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlag(function, "COMPONENT", 5);
+        SetOrderObjectFlag(function, "COMPONENT", 5, 4, 3);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -732,11 +732,6 @@ public sealed class SapDllSapClient : ISapClient
             var confirmableQty = ParseInt(GetString(row, _fieldMap.Operation.ConfirmableQuantity));
             var workCenterCode = GetString(row, _fieldMap.Operation.WorkCenterCode);
 
-            if (string.IsNullOrWhiteSpace(operationCode))
-            {
-                continue;
-            }
-
             results.Add(new SapOperation(orderNumber.Trim(), confirmation.Trim(), operationCode.Trim(), confirmableQty, stepCode.Trim(), workCenterCode.Trim()));
         }
 
@@ -773,11 +768,6 @@ public sealed class SapDllSapClient : ISapClient
             var stepCode = SafeGetFastField(getField, row, _fieldMap.Operation.StepCode);
             var confirmableQty = ParseInt(SafeGetFastField(getField, row, _fieldMap.Operation.ConfirmableQuantity));
             var workCenterCode = SafeGetFastField(getField, row, _fieldMap.Operation.WorkCenterCode);
-
-            if (string.IsNullOrWhiteSpace(operationCode))
-            {
-                continue;
-            }
 
             results.Add(new SapOperation(orderNumber.Trim(), confirmation.Trim(), operationCode.Trim(), confirmableQty, stepCode.Trim(), workCenterCode.Trim()));
         }
@@ -1281,7 +1271,7 @@ public sealed class SapDllSapClient : ISapClient
         }
     }
 
-    private static void SetOrderObjectFlag(object function, string fieldName, int fallbackOneBasedIndex)
+    private static void SetOrderObjectFlag(object function, string fieldName, params int[] fallbackIndexes)
     {
         var structure = GetStructure(function, "ORDER_OBJECTS");
         var setValueByName = SetValueNameObjectCache.GetOrAdd(structure.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }));
@@ -1298,7 +1288,22 @@ public sealed class SapDllSapClient : ISapClient
             }
         }
 
-        SetOrderObjectsByIndex(function, fallbackOneBasedIndex);
+        var indexes = fallbackIndexes is { Length: > 0 } ? fallbackIndexes : new[] { 0 };
+        Exception? lastException = null;
+        foreach (var index in indexes)
+        {
+            try
+            {
+                SetOrderObjectsByIndex(function, index);
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+            }
+        }
+
+        throw new InvalidOperationException($"Failed to set ORDER_OBJECTS flag '{fieldName}' using fallback index mode.", lastException);
     }
 
     private static object GetStructure(object function, string structureName)
