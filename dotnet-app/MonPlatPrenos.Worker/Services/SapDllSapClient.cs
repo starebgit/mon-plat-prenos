@@ -212,7 +212,7 @@ public sealed class SapDllSapClient : ISapClient
         return Path.GetFullPath(Path.Combine(baseDir, configuredPath));
     }
 
-    public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, DateTime? fromDate, DateTime? toDate, CancellationToken cancellationToken)
     {
         var function = CreateFunction("BAPI_PRODORD_GET_LIST");
 
@@ -220,6 +220,13 @@ public sealed class SapDllSapClient : ISapClient
         FillRange(function, "PROD_SCHED_RANGE", "EQ", schedulerCode);
         FillRange(function, "ORDER_NUMBER_RANGE", "GE", orderFrom);
         FillRange(function, "MATERIAL_RANGE", "BT", materialFrom, materialTo);
+
+        if (fromDate.HasValue || toDate.HasValue)
+        {
+            var effectiveFromDate = (fromDate ?? toDate).GetValueOrDefault().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            var effectiveToDate = (toDate ?? fromDate).GetValueOrDefault().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            FillRange(function, "START_DATE_RANGE", "BT", effectiveFromDate, effectiveToDate);
+        }
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
