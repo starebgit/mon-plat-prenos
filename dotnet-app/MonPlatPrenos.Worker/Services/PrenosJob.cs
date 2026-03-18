@@ -69,6 +69,7 @@ public sealed class PrenosJob
         var sapCallLimit = Math.Max(1, _options.MaxSapCallsInFlight);
         using var sapCallSemaphore = new SemaphoreSlim(sapCallLimit, sapCallLimit);
         var orderConcurrency = Math.Max(1, _options.OrderConcurrency);
+        var progressContext = new ProgressContext(orders.Count);
 
         var orderTasks = orders.Select((order, orderIndex) => (Func<Task<OrderProcessingResult>>)(() => ProcessOrderAsync(
             order,
@@ -78,6 +79,7 @@ public sealed class PrenosJob
             allRules,
             timing,
             sapCallSemaphore,
+            progressContext,
             status,
             cancellationToken)));
 
@@ -274,143 +276,148 @@ public sealed class PrenosJob
         IReadOnlyList<TermRule> allRules,
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
+        ProgressContext progress,
         ProgressStatus status,
         CancellationToken cancellationToken)
     {
         var result = new OrderProcessingResult(orderIndex);
         var stats = result.Stats;
-
-        if (_options.OrderConcurrency <= 1)
+        try
         {
-            var progressBar = BuildProgressBar(orderIndex + 1, totalOrders, 22);
-            RenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{totalOrders} | {order.OrderNumber}");
-            status.ForceNext();
-        }
-
-        if (IsTechnicallyClosedStatus(order.Status))
-        {
-            stats.SkippedByStatus++;
-            return result;
-        }
-
-        if (order.Material.Length < 9 || (order.Material[8] is not ('4' or '3' or '2')))
-        {
-            stats.SkippedByMaterialRule++;
-            return result;
-        }
-
-        stats.OrdersAfterCoreFilters++;
-        var operations = await TimedSapCallAsync(timing, "GetOperations", sapCallSemaphore, cancellationToken, () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
-        var validOperations = operations
-            .Where(o => operationCodes.Contains(o.OperationCode))
-            .Where(o => o.ConfirmableQty > 0)
-            .Where(o => o.StepCode == "0010")
-            .ToList();
-
-        stats.OperationRowsRead += operations.Count;
-        stats.ValidOperations += validOperations.Count;
-        if (validOperations.Count == 0)
-        {
-            // Delphi parity: plate demand rows are only produced from qualifying operations.
-            // If there are no valid operations, skip the order before missing-qty/component logic.
-            stats.SkippedByNoValidOperations++;
-            return result;
-        }
-
-        var totalYield = 0;
-        var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
-        if (maxConcurrency == 1 || validOperations.Count <= 1)
-        {
-            foreach (var op in validOperations)
+            if (IsTechnicallyClosedStatus(order.Status))
             {
-                var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
-                stats.ConfirmationRowsRead += confirmations.Count;
-                totalYield += confirmations.Sum(c => c.Yield);
+                stats.SkippedByStatus++;
+                return result;
             }
-        }
-        else
-        {
-            using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-            var confirmationTasks = validOperations.Select(async op =>
-            {
-                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
-                {
-                    var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
-                    return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            });
 
-            var confirmationResults = await Task.WhenAll(confirmationTasks).ConfigureAwait(false);
-            foreach (var item in confirmationResults)
+            if (order.Material.Length < 9 || (order.Material[8] is not ('4' or '3' or '2')))
             {
-                stats.ConfirmationRowsRead += item.Count;
-                totalYield += item.Yield;
+                stats.SkippedByMaterialRule++;
+                return result;
             }
-        }
 
-        var missingQty = order.PlannedQuantity - totalYield;
-        if (missingQty <= 0)
-        {
-            stats.SkippedByMissingQty++;
-            return result;
-        }
+            stats.OrdersAfterCoreFilters++;
+            var operations = await TimedSapCallAsync(timing, "GetOperations", sapCallSemaphore, cancellationToken, () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
+            var validOperations = operations
+                .Where(o => operationCodes.Contains(o.OperationCode))
+                .Where(o => o.ConfirmableQty > 0)
+                .Where(o => o.StepCode == "0010")
+                .ToList();
 
-        var operationTrackCode = validOperations
-            .Select(o => o.WorkCenterCode)
-            .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
-        var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
-        var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
-        result.PlateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
-        stats.PlateRecordsWritten++;
-
-        var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
-        stats.ComponentRowsRead += components.Count;
-
-        foreach (var component in components)
-        {
-            foreach (var rule in allRules)
+            stats.OperationRowsRead += operations.Count;
+            stats.ValidOperations += validOperations.Count;
+            if (validOperations.Count == 0)
             {
-                if (!rule.IsMatch(component.Description))
+                // Delphi parity: plate demand rows are only produced from qualifying operations.
+                // If there are no valid operations, skip the order before missing-qty/component logic.
+                stats.SkippedByNoValidOperations++;
+                return result;
+            }
+
+            var totalYield = 0;
+            var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
+            if (maxConcurrency == 1 || validOperations.Count <= 1)
+            {
+                foreach (var op in validOperations)
                 {
-                    continue;
+                    var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
+                    stats.ConfirmationRowsRead += confirmations.Count;
+                    totalYield += confirmations.Sum(c => c.Yield);
                 }
-
-                result.Unified.Add(new UnifiedItem(
-                    order.OrderNumber,
-                    formattedPlateMaterial,
-                    FormatMaterialLikeDelphi(component.Material),
-                    component.Description,
-                    rule.Name,
-                    missingQty,
-                    DateTime.UtcNow));
-
-                stats.UnifiedRowsWritten++;
-                stats.AddCategoryHit(rule.Name);
-
-                if (_options.EnableSemiFinishedExpansion)
+            }
+            else
+            {
+                using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+                var confirmationTasks = validOperations.Select(async op =>
                 {
-                    if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
                     {
-                        await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken);
+                        var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
+                        return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
                     }
-                    else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
-                             || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
-                             || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
+                    finally
                     {
-                        await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 0);
+                        semaphore.Release();
                     }
-                }
+                });
 
-                break;
+                var confirmationResults = await Task.WhenAll(confirmationTasks).ConfigureAwait(false);
+                foreach (var item in confirmationResults)
+                {
+                    stats.ConfirmationRowsRead += item.Count;
+                    totalYield += item.Yield;
+                }
+            }
+
+            var missingQty = order.PlannedQuantity - totalYield;
+            if (missingQty <= 0)
+            {
+                stats.SkippedByMissingQty++;
+                return result;
+            }
+
+            var operationTrackCode = validOperations
+                .Select(o => o.WorkCenterCode)
+                .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
+            var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
+            var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
+            result.PlateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
+            stats.PlateRecordsWritten++;
+
+            var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
+            stats.ComponentRowsRead += components.Count;
+
+            foreach (var component in components)
+            {
+                foreach (var rule in allRules)
+                {
+                    if (!rule.IsMatch(component.Description))
+                    {
+                        continue;
+                    }
+
+                    result.Unified.Add(new UnifiedItem(
+                        order.OrderNumber,
+                        formattedPlateMaterial,
+                        FormatMaterialLikeDelphi(component.Material),
+                        component.Description,
+                        rule.Name,
+                        missingQty,
+                        DateTime.UtcNow));
+
+                    stats.UnifiedRowsWritten++;
+                    stats.AddCategoryHit(rule.Name);
+
+                    if (_options.EnableSemiFinishedExpansion)
+                    {
+                        if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken);
+                        }
+                        else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
+                                 || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
+                                 || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 0);
+                        }
+                    }
+
+                    break;
+                }
+            }
+
+            return result;
+        }
+        finally
+        {
+            var done = Interlocked.Increment(ref progress.Processed);
+            if (status.ShouldRender())
+            {
+                var progressBar = BuildProgressBar(done, progress.TotalOrders, 22);
+                RenderSingleLineStatus($"{progressBar} {done}/{progress.TotalOrders} | {order.OrderNumber}");
             }
         }
-
-        return result;
     }
 
     private async Task ObdelajSamotAsync(
@@ -1093,6 +1100,17 @@ public sealed class PrenosJob
         {
             _lastUpdateMs = long.MinValue;
         }
+    }
+
+    private sealed class ProgressContext
+    {
+        public ProgressContext(int totalOrders)
+        {
+            TotalOrders = Math.Max(0, totalOrders);
+        }
+
+        public int TotalOrders { get; }
+        public int Processed;
     }
 
     private static string BuildProgressBar(int current, int total, int width)
