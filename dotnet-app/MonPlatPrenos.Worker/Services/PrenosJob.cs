@@ -55,6 +55,8 @@ public sealed class PrenosJob
                 _options.PlateMaterialFrom,
                 _options.PlateMaterialTo,
                 orderFrom,
+                forDate,
+                forDate,
                 cancellationToken));
 
         stats.TotalOrdersFetched = orders.Count;
