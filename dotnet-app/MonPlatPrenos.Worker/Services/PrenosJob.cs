@@ -637,7 +637,7 @@ public sealed class PrenosJob
         var filePattern = string.IsNullOrWhiteSpace(_options.FetchedCodeLogFilePattern)
             ? "fetched-codes-{timestamp}.txt"
             : _options.FetchedCodeLogFilePattern;
-        var fileName = filePattern.Replace("{timestamp}", stamp, StringComparison.Ordinal);
+        var fileName = filePattern.Replace("{timestamp}", stamp);
         var path = Path.IsPathRooted(fileName)
             ? fileName
             : Path.Combine(_options.OutputDirectory, fileName);
