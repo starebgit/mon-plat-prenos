@@ -667,13 +667,41 @@ public sealed class PrenosJob
             ? fileName
             : Path.Combine(outputDirectory, fileName);
 
-        var lines = orders
+        var sortedOrders = orders
             .OrderBy(o => o.OrderNumber, StringComparer.Ordinal)
-            .Select(o => $"{o.OrderNumber}|{FormatMaterialLikeDelphi(o.Material)}|{o.Status}|{o.StartDate:yyyy-MM-dd}")
             .ToList();
-        if (lines.Count == 0)
+
+        var lines = new List<string>
         {
-            lines.Add("# NO_ORDERS_FETCHED");
+            "# fetched-codes rows",
+            "# format: jsonl (one JSON object per fetched row)",
+            "# purpose: compare fetched row payload with legacy Delphi filtering behavior"
+        };
+
+        if (sortedOrders.Count == 0)
+        {
+            lines.Add("{\"note\":\"NO_ORDERS_FETCHED\"}");
+        }
+        else
+        {
+            foreach (var order in sortedOrders)
+            {
+                var logRow = new
+                {
+                    order.OrderNumber,
+                    order.Material,
+                    MaterialLikeDelphi = FormatMaterialLikeDelphi(order.Material),
+                    order.Status,
+                    order.PlannedQuantity,
+                    StartDate = order.StartDate.ToString("yyyy-MM-dd"),
+                    order.WorkCenterTrackCode,
+                    order.SchedulerCode,
+                    order.Plant,
+                    LegacyCodeLine = $"{order.OrderNumber}|{FormatMaterialLikeDelphi(order.Material)}|{order.Status}|{order.StartDate:yyyy-MM-dd}"
+                };
+
+                lines.Add(JsonSerializer.Serialize(logRow));
+            }
         }
 
         await WriteAllTextCompatAsync(path, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
