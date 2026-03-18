@@ -257,7 +257,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectsByIndex(function, 4);
+        SetOrderObjectFlag(function, "OPERATION", 4);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -308,7 +308,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectsByIndex(function, 3);
+        SetOrderObjectFlag(function, "COMPONENT", 5);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -1279,6 +1279,26 @@ public sealed class SapDllSapClient : ISapClient
         {
             throw new InvalidOperationException($"Could not set ORDER_OBJECTS at strict index {index}.", ex);
         }
+    }
+
+    private static void SetOrderObjectFlag(object function, string fieldName, int fallbackOneBasedIndex)
+    {
+        var structure = GetStructure(function, "ORDER_OBJECTS");
+        var setValueByName = SetValueNameObjectCache.GetOrAdd(structure.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }));
+        if (setValueByName is not null)
+        {
+            try
+            {
+                setValueByName.Invoke(structure, new object[] { fieldName, "X" });
+                return;
+            }
+            catch
+            {
+                // fall through to strict index mode for wrappers that reject name-based writes here
+            }
+        }
+
+        SetOrderObjectsByIndex(function, fallbackOneBasedIndex);
     }
 
     private static object GetStructure(object function, string structureName)
