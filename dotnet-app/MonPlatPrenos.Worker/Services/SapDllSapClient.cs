@@ -257,7 +257,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlag(function, "OPERATION", 4, 3);
+        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 4, fieldName: "OPERATION");
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -308,7 +308,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlag(function, "COMPONENT", 5, 4, 3);
+        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 5, fieldName: "COMPONENT");
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -1269,6 +1269,23 @@ public sealed class SapDllSapClient : ISapClient
         {
             throw new InvalidOperationException($"Could not set ORDER_OBJECTS at strict index {index}.", ex);
         }
+    }
+
+    private static void SetOrderObjectFlagWithDelphiParity(object function, int delphiIndex, string fieldName)
+    {
+        // Delphi parity path: funct.exports('ORDER_OBJECTS').value(4|5) := 'X'
+        // Prefer strict positional write first because some wrappers silently ignore name-based writes.
+        try
+        {
+            SetOrderObjectsByIndex(function, delphiIndex);
+            return;
+        }
+        catch
+        {
+            // fallback to existing robust name/index strategy
+        }
+
+        SetOrderObjectFlag(function, fieldName, delphiIndex, 4, 5, 3);
     }
 
     private static void SetOrderObjectFlag(object function, string fieldName, params int[] fallbackIndexes)
