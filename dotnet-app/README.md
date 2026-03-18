@@ -36,6 +36,16 @@ dotnet run
 
 When using `--run-once`, `--from-date` is optional and sets the one-day run date (`DateTime.Today` when omitted). `--to-date` is ignored.
 
+
+## Visual Studio (F5) run-once
+
+The worker now includes `Properties/launchSettings.json` with a default debug profile:
+
+- **MonPlatPrenos.Worker (run-once)** → starts with `--run-once` (one-shot execution when pressing F5).
+- **MonPlatPrenos.Worker (scheduler)** → starts without args (normal scheduled service mode).
+
+In Visual Studio, select the desired profile from the debug target dropdown before pressing F5.
+
 ## VS Code debug/run-once workflow
 
 For easier debugging in VS Code, the repository now includes:

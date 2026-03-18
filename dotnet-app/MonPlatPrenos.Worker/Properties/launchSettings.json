@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "MonPlatPrenos.Worker (run-once)": {
+      "commandName": "Project",
+      "commandLineArgs": "--run-once"
+    },
+    "MonPlatPrenos.Worker (scheduler)": {
+      "commandName": "Project"
+    }
+  }
+}
