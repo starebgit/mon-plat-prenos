@@ -291,6 +291,8 @@ public sealed class PrenosJob
         ProgressContext progress,
         CancellationToken cancellationToken)
     {
+        var orderSw = Stopwatch.StartNew();
+        var trace = new OrderTrace(order.OrderNumber);
         var result = new OrderProcessingResult(orderIndex);
         var stats = result.Stats;
         Interlocked.Increment(ref progress.Started);
@@ -405,13 +407,13 @@ public sealed class PrenosJob
                     {
                         if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                         {
-                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken);
+                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, cancellationToken);
                         }
                         else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
                                  || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
                                  || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
                         {
-                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 0);
+                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, cancellationToken, depth: 0);
                         }
                     }
 
@@ -423,6 +425,13 @@ public sealed class PrenosJob
         }
         finally
         {
+            if (trace.HasSapExpansion || orderSw.ElapsedMilliseconds >= 5000)
+            {
+                Console.WriteLine(
+                    $"ORDER_TRACE order={order.OrderNumber} elapsedMs={orderSw.ElapsedMilliseconds} " +
+                    $"semiCalls={trace.SemiExpansionCalls} fallbackCalls={trace.SemiFallbackCalls} " +
+                    $"subOrders={trace.SubOrdersRead} afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls}");
+            }
             Interlocked.Increment(ref progress.Processed);
         }
     }
@@ -467,13 +476,14 @@ public sealed class PrenosJob
         ProcessingStats stats,
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
+        OrderTrace trace,
         CancellationToken cancellationToken)
     {
-        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 0);
+        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, trace, cancellationToken, depth: 0);
 
         foreach (var samotOrder in samotOrders)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, cancellationToken);
         }
     }
 
@@ -486,6 +496,7 @@ public sealed class PrenosJob
         ProcessingStats stats,
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
+        OrderTrace trace,
         CancellationToken cancellationToken,
         int depth)
     {
@@ -493,6 +504,7 @@ public sealed class PrenosJob
         {
             return Array.Empty<SapOrderHeader>();
         }
+        trace.SemiExpansionCalls++;
 
         var subOrders = await TimedSapCallAsync(
             timing,
@@ -507,6 +519,7 @@ public sealed class PrenosJob
 
         if (subOrders.Count == 0)
         {
+            trace.SemiFallbackCalls++;
             subOrders = await TimedSapCallAsync(
                 timing,
                 "GetProductionOrdersByMaterialFallback",
@@ -518,9 +531,11 @@ public sealed class PrenosJob
                     null,
                     cancellationToken));
         }
+        trace.SubOrdersRead += subOrders.Count;
 
         foreach (var subOrder in subOrders)
         {
+            trace.AfruCalls++;
             var afruDelta = await TimedSapCallAsync(timing, "GetAfruYieldDelta", sapCallSemaphore, cancellationToken, () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
 
             semiFinished.Add(new SemiFinishedTrace(
@@ -557,8 +572,10 @@ public sealed class PrenosJob
         ProcessingStats stats,
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
+        OrderTrace trace,
         CancellationToken cancellationToken)
     {
+        trace.ComponentExpansionCalls++;
         var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
         stats.ComponentRowsRead += components.Count;
 
@@ -566,7 +583,7 @@ public sealed class PrenosJob
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, cancellationToken, depth: 1);
+                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, trace, cancellationToken, depth: 1);
                 continue;
             }
 
@@ -1151,6 +1168,23 @@ public sealed class PrenosJob
         public int TotalOrders { get; }
         public int Started;
         public int Processed;
+    }
+
+    private sealed class OrderTrace
+    {
+        public OrderTrace(string orderNumber)
+        {
+            OrderNumber = orderNumber;
+        }
+
+        public string OrderNumber { get; }
+        public int SemiExpansionCalls;
+        public int SemiFallbackCalls;
+        public int SubOrdersRead;
+        public int AfruCalls;
+        public int ComponentExpansionCalls;
+
+        public bool HasSapExpansion => SemiExpansionCalls > 0 || AfruCalls > 0 || SubOrdersRead > 0;
     }
 
     private static string BuildProgressBar(int current, int total, int width)
