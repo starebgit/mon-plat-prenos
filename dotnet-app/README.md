@@ -122,6 +122,36 @@ Phase 4 adds two business-safe volume controls:
 
 The effective `orderFrom` is `max(Prenos:OrderFrom, watermarkValue)` when watermarking is enabled.
 
+## Parity mode (fixed fromDate + fixed orderFrom)
+
+Use parity mode when you need deterministic reruns against the exact same inputs.
+
+When `Prenos:ParityMode:Enabled` is `true`, the worker:
+- always uses `Prenos:ParityMode:FixedFromDate` as `fromDate`,
+- always uses `Prenos:ParityMode:FixedOrderFrom` as `orderFrom`,
+- skips watermark read/write entirely,
+- fails fast at startup if either fixed value is missing.
+
+Sample config:
+
+```json
+"Prenos": {
+  "ParityMode": {
+    "Enabled": true,
+    "FixedFromDate": "2026-03-11",
+    "FixedOrderFrom": "000005223286"
+  }
+}
+```
+
+Run command:
+
+```bash
+dotnet run -- --run-once
+```
+
+With parity mode enabled, `--from-date` is ignored and the fixed date is always used.
+
 `--run-once` does two steps:
 
 1. login/config check (loads SAP settings from direct `Prenos:Sap` values or DB lookup and prints `RUN-ONCE LOGIN CHECK`)
