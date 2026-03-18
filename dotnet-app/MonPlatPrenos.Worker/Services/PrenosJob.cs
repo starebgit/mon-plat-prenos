@@ -32,7 +32,7 @@ public sealed class PrenosJob
         var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
         var outputDirectory = GetOutputDirectoryPath();
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
-        var activeFromDateFilter = _options.ApplyFromDateFilter ? effectiveFromDate : null;
+        var activeFromDateFilter = (DateTime?)null;
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
@@ -74,7 +74,6 @@ public sealed class PrenosJob
             order,
             orderIndex,
             orders.Count,
-            activeFromDateFilter,
             operationCodes,
             allRules,
             timing,
@@ -271,7 +270,6 @@ public sealed class PrenosJob
         SapOrderHeader order,
         int orderIndex,
         int totalOrders,
-        DateTime? forDate,
         HashSet<string> operationCodes,
         IReadOnlyList<TermRule> allRules,
         TimingCollector timing,
@@ -287,12 +285,6 @@ public sealed class PrenosJob
             var progressBar = BuildProgressBar(orderIndex + 1, totalOrders, 22);
             RenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{totalOrders} | {order.OrderNumber}");
             status.ForceNext();
-        }
-
-        if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
-        {
-            stats.SkippedByDateFilter++;
-            return result;
         }
 
         if (IsTechnicallyClosedStatus(order.Status))
@@ -667,13 +659,41 @@ public sealed class PrenosJob
             ? fileName
             : Path.Combine(outputDirectory, fileName);
 
-        var lines = orders
+        var sortedOrders = orders
             .OrderBy(o => o.OrderNumber, StringComparer.Ordinal)
-            .Select(o => $"{o.OrderNumber}|{FormatMaterialLikeDelphi(o.Material)}|{o.Status}|{o.StartDate:yyyy-MM-dd}")
             .ToList();
-        if (lines.Count == 0)
+
+        var lines = new List<string>
         {
-            lines.Add("# NO_ORDERS_FETCHED");
+            "# fetched-codes rows",
+            "# format: jsonl (one JSON object per fetched row)",
+            "# purpose: compare fetched row payload with legacy Delphi filtering behavior"
+        };
+
+        if (sortedOrders.Count == 0)
+        {
+            lines.Add("{\"note\":\"NO_ORDERS_FETCHED\"}");
+        }
+        else
+        {
+            foreach (var order in sortedOrders)
+            {
+                var logRow = new
+                {
+                    order.OrderNumber,
+                    order.Material,
+                    MaterialLikeDelphi = FormatMaterialLikeDelphi(order.Material),
+                    order.Status,
+                    order.PlannedQuantity,
+                    StartDate = order.StartDate.ToString("yyyy-MM-dd"),
+                    order.WorkCenterTrackCode,
+                    order.SchedulerCode,
+                    order.Plant,
+                    LegacyCodeLine = $"{order.OrderNumber}|{FormatMaterialLikeDelphi(order.Material)}|{order.Status}|{order.StartDate:yyyy-MM-dd}"
+                };
+
+                lines.Add(JsonSerializer.Serialize(logRow));
+            }
         }
 
         await WriteAllTextCompatAsync(path, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
