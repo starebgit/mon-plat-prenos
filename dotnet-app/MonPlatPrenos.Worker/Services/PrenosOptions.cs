@@ -98,10 +98,10 @@ public sealed class OrderHeaderFieldMap
 public sealed class OperationFieldMap
 {
     public string Confirmation { get; set; } = "CONF_NO";
-    public string OperationCode { get; set; } = "OPR";
-    public string StepCode { get; set; } = "OPER";
+    public string OperationCode { get; set; } = "OPR_CNTRL_KEY";
+    public string StepCode { get; set; } = "OPERATION_NUMBER";
     public string ConfirmableQuantity { get; set; } = "QUANTITY";
-    public string WorkCenterCode { get; set; } = "WORK_CNTR";
+    public string WorkCenterCode { get; set; } = "WORK_CENTER";
 }
 
 public sealed class ComponentFieldMap
