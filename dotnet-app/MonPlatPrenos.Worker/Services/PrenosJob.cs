@@ -900,7 +900,7 @@ public sealed class PrenosJob
         }
 
         var trimmed = status.Trim();
-        var prefix = trimmed.Length >= 4 ? trimmed[..4] : trimmed;
+        var prefix = trimmed.Length >= 4 ? trimmed.Substring(0, 4) : trimmed;
         return string.Equals(prefix, "TEHZ", StringComparison.Ordinal)
             || string.Equals(prefix, "ZAKL", StringComparison.Ordinal);
     }
