@@ -72,6 +72,8 @@ public sealed class PrenosJob
         var progressContext = new ProgressContext(orders.Count);
         RenderSingleLineStatus($"{BuildProgressBar(0, progressContext.TotalOrders, 22)} 0/{progressContext.TotalOrders}");
         status.ForceNext();
+        using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var progressTask = RunProgressReporterAsync(progressContext, progressCts.Token);
 
         var orderTasks = orders.Select((order, orderIndex) => (Func<Task<OrderProcessingResult>>)(() => ProcessOrderAsync(
             order,
@@ -82,12 +84,20 @@ public sealed class PrenosJob
             timing,
             sapCallSemaphore,
             progressContext,
-            status,
             cancellationToken)));
 
-        var orderedResults = orderConcurrency <= 1
-            ? await RunSequentialAsync(orderTasks, cancellationToken)
-            : await RunConcurrentAsync(orderTasks, orderConcurrency, cancellationToken);
+        List<OrderProcessingResult> orderedResults;
+        try
+        {
+            orderedResults = orderConcurrency <= 1
+                ? await RunSequentialAsync(orderTasks, cancellationToken)
+                : await RunConcurrentAsync(orderTasks, orderConcurrency, cancellationToken);
+        }
+        finally
+        {
+            progressCts.Cancel();
+            await AwaitProgressTaskSafeAsync(progressTask);
+        }
 
         var plateDemands = new List<PlateDemandRecord>();
         var unified = new List<UnifiedItem>();
@@ -279,17 +289,11 @@ public sealed class PrenosJob
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
         ProgressContext progress,
-        ProgressStatus status,
         CancellationToken cancellationToken)
     {
         var result = new OrderProcessingResult(orderIndex);
         var stats = result.Stats;
-        var started = Interlocked.Increment(ref progress.Started);
-        if (status.ShouldRender())
-        {
-            var startBar = BuildProgressBar(progress.Processed, progress.TotalOrders, 22);
-            RenderSingleLineStatus($"{startBar} {progress.Processed}/{progress.TotalOrders} done | {started}/{progress.TotalOrders} started");
-        }
+        Interlocked.Increment(ref progress.Started);
         try
         {
             if (IsTechnicallyClosedStatus(order.Status))
@@ -419,12 +423,39 @@ public sealed class PrenosJob
         }
         finally
         {
-            var done = Interlocked.Increment(ref progress.Processed);
-            if (status.ShouldRender())
+            Interlocked.Increment(ref progress.Processed);
+        }
+    }
+
+    private static async Task RunProgressReporterAsync(ProgressContext progress, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var done = Volatile.Read(ref progress.Processed);
+            var started = Volatile.Read(ref progress.Started);
+            var bar = BuildProgressBar(done, progress.TotalOrders, 22);
+            RenderSingleLineStatus($"{bar} {done}/{progress.TotalOrders} done | {started}/{progress.TotalOrders} started");
+
+            try
             {
-                var progressBar = BuildProgressBar(done, progress.TotalOrders, 22);
-                RenderSingleLineStatus($"{progressBar} {done}/{progress.TotalOrders} done | {progress.Started}/{progress.TotalOrders} started | {order.OrderNumber}");
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
             }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private static async Task AwaitProgressTaskSafeAsync(Task progressTask)
+    {
+        try
+        {
+            await progressTask.ConfigureAwait(false);
+        }
+        catch (TaskCanceledException)
+        {
+            // expected when finishing processing
         }
     }
 
