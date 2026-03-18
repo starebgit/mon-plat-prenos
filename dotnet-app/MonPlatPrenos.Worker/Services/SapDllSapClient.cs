@@ -92,6 +92,10 @@ public sealed class SapDllSapClient : ISapClient
     private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> ConfigSetItemCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> MetadataPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> MetadataCountPropertyCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> MetadataIndexerByIntCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> MetadataNamePropertyCache = new();
     private static readonly ConcurrentDictionary<Type, RowAccessorCacheItem> RowAccessorCache = new();
     private static readonly ConcurrentDictionary<Type, FastTableAccessor> FastTableAccessorCache = new();
     private static readonly ConcurrentDictionary<Type, FastRowAccessor> FastRowAccessorCache = new();
@@ -225,7 +229,11 @@ public sealed class SapDllSapClient : ISapClient
         {
             var effectiveFromDate = (fromDate ?? toDate).GetValueOrDefault().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
             var effectiveToDate = (toDate ?? fromDate).GetValueOrDefault().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-            FillRange(function, "START_DATE_RANGE", "BT", effectiveFromDate, effectiveToDate);
+            var startDateRangeTable = ResolveStartDateRangeTableName(function)
+                ?? throw new InvalidOperationException(
+                    $"BAPI_PRODORD_GET_LIST does not expose a START/DATE range table. Available parameters: {string.Join(", ", GetFunctionParameterNames(function))}");
+
+            FillRange(function, startDateRangeTable, "BT", effectiveFromDate, effectiveToDate);
         }
 
         var invokeSw = Stopwatch.StartNew();
@@ -1248,6 +1256,67 @@ public sealed class SapDllSapClient : ISapClient
         var setValue = SetValueNameObjectCache.GetOrAdd(function.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }))
                        ?? throw new InvalidOperationException("Could not find function.SetValue(string, object).");
         setValue.Invoke(function, new object[] { importName, value });
+    }
+
+    private static string? ResolveStartDateRangeTableName(object function)
+    {
+        const string expectedName = "START_DATE_RANGE";
+        var parameterNames = GetFunctionParameterNames(function);
+
+        if (parameterNames.Any(n => string.Equals(n, expectedName, StringComparison.Ordinal)))
+        {
+            return expectedName;
+        }
+
+        var discoveredNames = parameterNames
+            .Where(n => n.EndsWith("_RANGE", StringComparison.Ordinal)
+                        && n.IndexOf("START", StringComparison.OrdinalIgnoreCase) >= 0
+                        && n.IndexOf("DATE", StringComparison.OrdinalIgnoreCase) >= 0)
+            .ToList();
+
+        return discoveredNames.Count == 1 ? discoveredNames[0] : null;
+    }
+
+    private static IReadOnlyList<string> GetFunctionParameterNames(object function)
+    {
+        var metadata = MetadataPropertyCache.GetOrAdd(function.GetType(), t => t.GetProperty("Metadata"))?.GetValue(function);
+        if (metadata is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var metadataType = metadata.GetType();
+        var countProperty = MetadataCountPropertyCache.GetOrAdd(metadataType, t => t.GetProperty("Count"));
+        var countObj = countProperty?.GetValue(metadata);
+        if (countObj is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var getItemByIndex = MetadataIndexerByIntCache.GetOrAdd(metadataType, t => t.GetMethod("get_Item", new[] { typeof(int) }));
+        if (getItemByIndex is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var count = Convert.ToInt32(countObj, CultureInfo.InvariantCulture);
+        var names = new List<string>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var metadataItem = getItemByIndex.Invoke(metadata, new object[] { i });
+            if (metadataItem is null)
+            {
+                continue;
+            }
+
+            var name = MetadataNamePropertyCache.GetOrAdd(metadataItem.GetType(), t => t.GetProperty("Name"))?.GetValue(metadataItem) as string;
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                names.Add(name);
+            }
+        }
+
+        return names;
     }
 
     private static void SetOrderObjectsByIndex(object function, int index)
