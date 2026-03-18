@@ -14,6 +14,8 @@ public interface ISapClient
         string materialFrom,
         string materialTo,
         string orderFrom,
+        DateTime? fromDate,
+        DateTime? toDate,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SapOperation>> GetOperationsAsync(string orderNumber, CancellationToken cancellationToken);
