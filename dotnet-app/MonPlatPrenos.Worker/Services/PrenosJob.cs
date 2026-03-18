@@ -521,7 +521,7 @@ public sealed class PrenosJob
 
         foreach (var subOrder in subOrders)
         {
-            var afruDelta = await TimedSapCallAsync(timing, "GetAfruYieldDelta", sapCallSemaphore, cancellationToken, () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, plateOrder.StartDate, cancellationToken));
+            var afruDelta = await TimedSapCallAsync(timing, "GetAfruYieldDelta", sapCallSemaphore, cancellationToken, () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
