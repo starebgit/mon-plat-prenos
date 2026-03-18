@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "MonPlatPrenos: Debug run-once (F5)",
+      "type": "clr",
+      "request": "launch",
+      "preLaunchTask": "build-worker",
+      "program": "${workspaceFolder}/dotnet-app/MonPlatPrenos.Worker/bin/Debug/net48/MonPlatPrenos.Worker.exe",
+      "args": [
+        "--run-once"
+      ],
+      "cwd": "${workspaceFolder}/dotnet-app/MonPlatPrenos.Worker",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "MonPlatPrenos.Worker (run once)": {
+      "commandName": "Project",
+      "commandLineArgs": "--run-once",
+      "workingDirectory": "."
+    }
+  }
+}

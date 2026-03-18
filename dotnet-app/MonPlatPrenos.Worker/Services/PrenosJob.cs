@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
 using MonPlatPrenos.Worker.Models;
@@ -51,6 +50,7 @@ public sealed class PrenosJob
                 cancellationToken));
 
         stats.TotalOrdersFetched = orders.Count;
+        await WriteFetchedCodesLogAsync(orders, cancellationToken);
         var maxFetchedOrderNumber = orders.Select(o => o.OrderNumber).Where(o => !string.IsNullOrWhiteSpace(o)).OrderBy(o => o, StringComparer.Ordinal).LastOrDefault();
         RenderSingleLineStatus($"Fetched {orders.Count} production orders. Processing...");
         status.ForceNext();
@@ -591,6 +591,33 @@ public sealed class PrenosJob
         await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
     }
 
+    private async Task WriteFetchedCodesLogAsync(IReadOnlyList<SapOrderHeader> orders, CancellationToken cancellationToken)
+    {
+        if (orders.Count == 0)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_options.OutputDirectory);
+
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var filePattern = string.IsNullOrWhiteSpace(_options.FetchedCodeLogFilePattern)
+            ? "fetched-codes-{timestamp}.txt"
+            : _options.FetchedCodeLogFilePattern;
+        var fileName = filePattern.Replace("{timestamp}", stamp, StringComparison.Ordinal);
+        var path = Path.IsPathRooted(fileName)
+            ? fileName
+            : Path.Combine(_options.OutputDirectory, fileName);
+
+        var lines = orders
+            .OrderBy(o => o.OrderNumber, StringComparer.Ordinal)
+            .Select(o => $"{o.OrderNumber}|{FormatMaterialLikeDelphi(o.Material)}|{o.Status}|{o.StartDate:yyyy-MM-dd}")
+            .ToList();
+
+        await WriteAllTextCompatAsync(path, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
+        Console.WriteLine($"Fetched code log written: {path}");
+    }
+
 
 
     private async Task WriteBenchmarkArtifactsAsync(
@@ -836,29 +863,6 @@ public sealed class PrenosJob
                 .ToList();
         }
 
-        public string ToReportText()
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("Prenos timing report");
-            sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            sb.AppendLine();
-
-            List<KeyValuePair<string, Item>> entries;
-            lock (_sync)
-            {
-                entries = _map.ToList();
-            }
-
-            foreach (var kv in entries.OrderByDescending(e => e.Value.TotalMs))
-            {
-                var avg = kv.Value.Count == 0 ? 0 : (double)kv.Value.TotalMs / kv.Value.Count;
-                sb.AppendLine($"{kv.Key}");
-                sb.AppendLine($"  calls={kv.Value.Count}, totalMs={kv.Value.TotalMs}, avgMs={avg:F2}, maxMs={kv.Value.MaxMs}");
-                sb.AppendLine($"  firstSamplesMs=[{string.Join(", ", kv.Value.Samples)}]");
-            }
-
-            return sb.ToString();
-        }
     }
 
 
@@ -916,16 +920,6 @@ public sealed class PrenosJob
         {
             _lastUpdateMs = long.MinValue;
         }
-    }
-
-    private static void TryRenderSingleLineStatus(string message, ProgressStatus status)
-    {
-        if (!status.ShouldRender())
-        {
-            return;
-        }
-
-        RenderSingleLineStatus(message);
     }
 
     private static string BuildProgressBar(int current, int total, int width)
