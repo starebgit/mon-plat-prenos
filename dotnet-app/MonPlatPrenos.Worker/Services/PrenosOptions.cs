@@ -19,6 +19,7 @@ public sealed class PrenosOptions
     public string Plant { get; set; } = "1061";
     public string OrderFrom { get; set; } = "000005223286";
     public BenchmarkOptions Benchmark { get; set; } = new BenchmarkOptions();
+    public ParityBenchmarkModeOptions ParityBenchmarkMode { get; set; } = new ParityBenchmarkModeOptions();
     public bool UseTypedHotPath { get; set; } = true;
     public bool EnableSemiFinishedExpansion { get; set; } = true;
     public WatermarkOptions Watermark { get; set; } = new WatermarkOptions();
@@ -28,6 +29,13 @@ public sealed class PrenosOptions
 }
 
 public sealed class PrenosParityModeOptions
+{
+    public bool Enabled { get; set; }
+    public string? FixedFromDate { get; set; }
+    public string? FixedOrderFrom { get; set; }
+}
+
+public sealed class ParityBenchmarkModeOptions
 {
     public bool Enabled { get; set; }
     public string? FixedFromDate { get; set; }
