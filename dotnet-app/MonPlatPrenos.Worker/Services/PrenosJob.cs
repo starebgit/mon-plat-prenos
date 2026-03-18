@@ -32,7 +32,7 @@ public sealed class PrenosJob
         var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
         var outputDirectory = GetOutputDirectoryPath();
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
-        var activeFromDateFilter = _options.ApplyFromDateFilter ? effectiveFromDate : null;
+        var activeFromDateFilter = (DateTime?)null;
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
@@ -74,7 +74,6 @@ public sealed class PrenosJob
             order,
             orderIndex,
             orders.Count,
-            activeFromDateFilter,
             operationCodes,
             allRules,
             timing,
@@ -271,7 +270,6 @@ public sealed class PrenosJob
         SapOrderHeader order,
         int orderIndex,
         int totalOrders,
-        DateTime? forDate,
         HashSet<string> operationCodes,
         IReadOnlyList<TermRule> allRules,
         TimingCollector timing,
@@ -287,12 +285,6 @@ public sealed class PrenosJob
             var progressBar = BuildProgressBar(orderIndex + 1, totalOrders, 22);
             RenderSingleLineStatus($"{progressBar} {orderIndex + 1}/{totalOrders} | {order.OrderNumber}");
             status.ForceNext();
-        }
-
-        if (forDate.HasValue && order.StartDate.Date != forDate.Value.Date)
-        {
-            stats.SkippedByDateFilter++;
-            return result;
         }
 
         if (IsTechnicallyClosedStatus(order.Status))
