@@ -22,6 +22,7 @@ public sealed class PrenosOptions
     public bool UseTypedHotPath { get; set; } = true;
     public bool EnableSemiFinishedExpansion { get; set; } = true;
     public WatermarkOptions Watermark { get; set; } = new WatermarkOptions();
+    public string FetchedCodeLogFilePattern { get; set; } = "fetched-codes-{timestamp}.txt";
     public SapIntegrationOptions Sap { get; set; } = new SapIntegrationOptions();
 }
 

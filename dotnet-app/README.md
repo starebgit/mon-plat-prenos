@@ -36,6 +36,29 @@ dotnet run
 
 When using `--run-once`, `--from-date` is optional and sets the one-day run date (`DateTime.Today` when omitted). `--to-date` is ignored.
 
+## VS Code debug/run-once workflow
+
+For easier debugging in VS Code, the repository now includes:
+
+- `.vscode/launch.json` with **MonPlatPrenos: Debug run-once** (F5 launch in integrated terminal),
+- `.vscode/tasks.json` with **run-once-with-log** task for one-shot execution and captured console output.
+
+The task writes terminal output to:
+
+- `output/run-once-YYYYMMDD-HHMMSS.log`
+
+The worker also writes fetched order code rows to:
+
+- `output/fetched-codes-YYYYMMDD-HHMMSS.txt`
+
+You can change the fetched-code filename pattern with:
+
+```json
+"Prenos": {
+  "FetchedCodeLogFilePattern": "fetched-codes-{timestamp}.txt"
+}
+```
+
 ## Phase 0 benchmark mode (baseline + guardrails)
 
 You can now enable a reproducible benchmark snapshot in `Prenos:Benchmark`:

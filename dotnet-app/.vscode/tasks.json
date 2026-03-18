@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-worker",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "MonPlatPrenos.Worker/MonPlatPrenos.Worker.csproj"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/dotnet-app"
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "run-once-with-log",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; cd '${workspaceFolder}/dotnet-app/MonPlatPrenos.Worker'; mkdir -p output; log_file=\"output/run-once-$(date +%Y%m%d-%H%M%S).log\"; echo \"Writing console output to $log_file\"; dotnet run -- --run-once 2>&1 | tee \"$log_file\""
+      ],
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      }
+    }
+  ]
+}
