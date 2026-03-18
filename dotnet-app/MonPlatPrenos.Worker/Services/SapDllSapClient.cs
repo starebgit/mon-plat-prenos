@@ -1273,19 +1273,11 @@ public sealed class SapDllSapClient : ISapClient
 
     private static void SetOrderObjectFlagWithDelphiParity(object function, int delphiIndex, string fieldName)
     {
-        // Delphi parity path: funct.exports('ORDER_OBJECTS').value(4|5) := 'X'
-        // Prefer strict positional write first because some wrappers silently ignore name-based writes.
-        try
-        {
-            SetOrderObjectsByIndex(function, delphiIndex);
-            return;
-        }
-        catch
-        {
-            // fallback to existing robust name/index strategy
-        }
-
-        SetOrderObjectFlag(function, fieldName, delphiIndex, 4, 5, 3);
+        // Delphi writes ORDER_OBJECTS with 1-based positional indexes (value(4|5)).
+        // NCo SetValue(int, object) is 0-based, so we must first translate to delphiIndex-1.
+        // Keep defensive fallbacks for wrappers with different behavior.
+        var zeroBasedIndex = delphiIndex > 0 ? delphiIndex - 1 : delphiIndex;
+        SetOrderObjectFlag(function, fieldName, zeroBasedIndex, delphiIndex, 4, 5, 3);
     }
 
     private static void SetOrderObjectFlag(object function, string fieldName, params int[] fallbackIndexes)
