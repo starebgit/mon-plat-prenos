@@ -212,7 +212,7 @@ public sealed class SapDllSapClient : ISapClient
         return Path.GetFullPath(Path.Combine(baseDir, configuredPath));
     }
 
-    public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<SapOrderHeader>> GetProductionOrdersForPlatesAsync(string plant, string schedulerCode, string materialFrom, string materialTo, string orderFrom, DateTime? fromDate, DateTime? toDate, CancellationToken cancellationToken)
     {
         var function = CreateFunction("BAPI_PRODORD_GET_LIST");
 
@@ -220,6 +220,13 @@ public sealed class SapDllSapClient : ISapClient
         FillRange(function, "PROD_SCHED_RANGE", "EQ", schedulerCode);
         FillRange(function, "ORDER_NUMBER_RANGE", "GE", orderFrom);
         FillRange(function, "MATERIAL_RANGE", "BT", materialFrom, materialTo);
+
+        if (fromDate.HasValue || toDate.HasValue)
+        {
+            var effectiveFromDate = (fromDate ?? toDate).GetValueOrDefault().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            var effectiveToDate = (toDate ?? fromDate).GetValueOrDefault().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            TryApplyStartDateFilter(function, effectiveFromDate, effectiveToDate);
+        }
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -1222,6 +1229,81 @@ public sealed class SapDllSapClient : ISapClient
         {
             SetField(currentRow, "HIGH", high);
         }
+    }
+
+    private static void TryApplyStartDateFilter(object function, string lowSapDate, string highSapDate)
+    {
+        var rangeTableCandidates = new[]
+        {
+            "START_DATE_RANGE",
+            "BASIC_START_DATE_RANGE",
+            "SCHED_START_DATE_RANGE",
+            "PROD_START_DATE_RANGE",
+            "START_DATE_SEL"
+        };
+
+        foreach (var tableName in rangeTableCandidates)
+        {
+            if (TryFillRange(function, tableName, "BT", lowSapDate, highSapDate))
+            {
+                return;
+            }
+        }
+
+        var fromSet = TrySetImportAny(function, lowSapDate, "START_DATE", "FROM_DATE", "DATE_FROM", "LOW_DATE");
+        var toSet = TrySetImportAny(function, highSapDate, "END_DATE", "TO_DATE", "DATE_TO", "FINISH_DATE", "HIGH_DATE");
+        if (fromSet && (toSet || string.Equals(lowSapDate, highSapDate, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        Console.WriteLine("Warning: could not apply SAP start-date filter because no supported date-range parameter was found on BAPI_PRODORD_GET_LIST.");
+    }
+
+    private static bool TryFillRange(object function, string tableName, string option, string low, string? high = null)
+    {
+        try
+        {
+            FillRange(function, tableName, option, low, high);
+            return true;
+        }
+        catch (TargetInvocationException ex) when (IsUnknownRfcElement(ex, tableName))
+        {
+            return false;
+        }
+    }
+
+    private static bool TrySetImport(object function, string importName, string value)
+    {
+        try
+        {
+            SetImport(function, importName, value);
+            return true;
+        }
+        catch (TargetInvocationException ex) when (IsUnknownRfcElement(ex, importName))
+        {
+            return false;
+        }
+    }
+
+    private static bool TrySetImportAny(object function, string value, params string[] importNames)
+    {
+        foreach (var importName in importNames)
+        {
+            if (TrySetImport(function, importName, value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsUnknownRfcElement(TargetInvocationException ex, string elementName)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.IndexOf(elementName, StringComparison.OrdinalIgnoreCase) >= 0
+               && message.IndexOf("unknown", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool TrySetFieldOnTable(object table, string fieldName, string value)
