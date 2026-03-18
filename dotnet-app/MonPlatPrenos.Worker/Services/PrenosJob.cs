@@ -70,6 +70,8 @@ public sealed class PrenosJob
         using var sapCallSemaphore = new SemaphoreSlim(sapCallLimit, sapCallLimit);
         var orderConcurrency = Math.Max(1, _options.OrderConcurrency);
         var progressContext = new ProgressContext(orders.Count);
+        RenderSingleLineStatus($"{BuildProgressBar(0, progressContext.TotalOrders, 22)} 0/{progressContext.TotalOrders}");
+        status.ForceNext();
 
         var orderTasks = orders.Select((order, orderIndex) => (Func<Task<OrderProcessingResult>>)(() => ProcessOrderAsync(
             order,
@@ -282,6 +284,12 @@ public sealed class PrenosJob
     {
         var result = new OrderProcessingResult(orderIndex);
         var stats = result.Stats;
+        var started = Interlocked.Increment(ref progress.Started);
+        if (status.ShouldRender())
+        {
+            var startBar = BuildProgressBar(progress.Processed, progress.TotalOrders, 22);
+            RenderSingleLineStatus($"{startBar} {progress.Processed}/{progress.TotalOrders} done | {started}/{progress.TotalOrders} started");
+        }
         try
         {
             if (IsTechnicallyClosedStatus(order.Status))
@@ -415,7 +423,7 @@ public sealed class PrenosJob
             if (status.ShouldRender())
             {
                 var progressBar = BuildProgressBar(done, progress.TotalOrders, 22);
-                RenderSingleLineStatus($"{progressBar} {done}/{progress.TotalOrders} | {order.OrderNumber}");
+                RenderSingleLineStatus($"{progressBar} {done}/{progress.TotalOrders} done | {progress.Started}/{progress.TotalOrders} started | {order.OrderNumber}");
             }
         }
     }
@@ -1110,6 +1118,7 @@ public sealed class PrenosJob
         }
 
         public int TotalOrders { get; }
+        public int Started;
         public int Processed;
     }
 
@@ -1163,6 +1172,7 @@ public sealed class PrenosJob
     {
         if (Console.IsOutputRedirected)
         {
+            Console.WriteLine(message);
             return;
         }
 
