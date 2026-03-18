@@ -172,6 +172,10 @@ When `ParityBenchmarkMode.Enabled=true`, the worker automatically:
 - disables watermark movement (same behavior as parity mode),
 - writes an execution summary log: `output/parity-benchmark-run-*.log`.
 
+`Prenos:ApplyFromDateFilter` controls whether `fromDate` is actually applied during plate-order processing:
+- `true` (default): apply `fromDate` filter (parity/date-limited behavior),
+- `false`: ignore date filtering and behave like legacy Delphi fetch scope (larger order set, no date cut).
+
 Run it directly:
 
 ```bash

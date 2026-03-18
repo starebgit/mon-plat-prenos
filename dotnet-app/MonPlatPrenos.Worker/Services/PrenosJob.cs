@@ -32,12 +32,13 @@ public sealed class PrenosJob
         var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
         var outputDirectory = GetOutputDirectoryPath();
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
+        var activeFromDateFilter = _options.ApplyFromDateFilter ? effectiveFromDate : null;
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
         Console.WriteLine($"Run mode: {(parityBenchmarkModeEnabled ? "PARITY-BENCHMARK" : parityModeEnabled ? "PARITY" : "NORMAL")}");
         Console.WriteLine($"Output directory: {outputDirectory}");
-        Console.WriteLine($"Effective fromDate: {(effectiveFromDate.HasValue ? effectiveFromDate.Value.ToString("yyyy-MM-dd") : "ALL")}, orderFrom: {orderFrom}");
+        Console.WriteLine($"Effective fromDate: {(activeFromDateFilter.HasValue ? activeFromDateFilter.Value.ToString("yyyy-MM-dd") : "ALL")}, orderFrom: {orderFrom}");
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
@@ -55,8 +56,8 @@ public sealed class PrenosJob
                 _options.PlateMaterialFrom,
                 _options.PlateMaterialTo,
                 orderFrom,
-                effectiveFromDate,
-                effectiveFromDate,
+                activeFromDateFilter,
+                activeFromDateFilter,
                 cancellationToken));
 
         stats.TotalOrdersFetched = orders.Count;
@@ -73,7 +74,7 @@ public sealed class PrenosJob
             order,
             orderIndex,
             orders.Count,
-            effectiveFromDate,
+            activeFromDateFilter,
             operationCodes,
             allRules,
             timing,
@@ -111,14 +112,14 @@ public sealed class PrenosJob
                 stats,
                 timing,
                 runtimeMs,
-                effectiveFromDate,
+                activeFromDateFilter,
                 orderFrom,
                 cancellationToken);
         }
 
         if (parityBenchmarkModeEnabled)
         {
-            await WriteParityBenchmarkRunLogAsync(runtimeMs, effectiveFromDate, orderFrom, plateDemands.Count, unified.Count, semiFinished.Count, cancellationToken);
+            await WriteParityBenchmarkRunLogAsync(runtimeMs, activeFromDateFilter, orderFrom, plateDemands.Count, unified.Count, semiFinished.Count, cancellationToken);
         }
 
         if (!parityModeEnabled)
