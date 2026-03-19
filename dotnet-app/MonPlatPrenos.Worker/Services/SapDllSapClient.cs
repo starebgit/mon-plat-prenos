@@ -238,17 +238,6 @@ public sealed class SapDllSapClient : ISapClient
             ? ParsePlateOrderHeadersFast(orderHeader, plant, schedulerCode)
             : ParsePlateOrderHeadersReflection(orderHeader, plant, schedulerCode);
 
-        if (fromDate.HasValue || toDate.HasValue)
-        {
-            var effectiveFromDate = (fromDate ?? toDate).GetValueOrDefault().Date;
-            var effectiveToDate = (toDate ?? fromDate).GetValueOrDefault().Date;
-
-            results = results
-                .Where(order => order.StartDate.Date >= effectiveFromDate && order.StartDate.Date <= effectiveToDate)
-                .ToList();
-        }
-
-
         AddDetailedTiming("GetProductionOrdersForPlates.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult(results);
     }
