@@ -35,7 +35,7 @@ public sealed class PrenosJob
         var outputDirectory = GetOutputDirectoryPath();
         InitializeDiagnosticsLog(outputDirectory);
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
-        var activeFromDateFilter = (DateTime?)null;
+        var activeFromDateFilter = _options.ApplyFromDateFilter ? effectiveFromDate : null;
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
