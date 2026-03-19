@@ -23,6 +23,12 @@ public sealed class PrenosOptions
     public ParityBenchmarkModeOptions ParityBenchmarkMode { get; set; } = new ParityBenchmarkModeOptions();
     public bool UseTypedHotPath { get; set; } = true;
     public bool EnableSemiFinishedExpansion { get; set; } = true;
+    public bool EnableSapCallTrace { get; set; }
+    public int SapCallWarnMs { get; set; } = 2000;
+    public int SapWaitWarnMs { get; set; } = 1000;
+    public int OrderTraceWarnMs { get; set; } = 5000;
+    public bool EnableDiagnosticsFileLog { get; set; } = true;
+    public string DiagnosticsLogFilePattern { get; set; } = "diagnostics-{timestamp}.log";
     public WatermarkOptions Watermark { get; set; } = new WatermarkOptions();
     public PrenosParityModeOptions ParityMode { get; set; } = new PrenosParityModeOptions();
     public string FetchedCodeLogFilePattern { get; set; } = "fetched-codes-{timestamp}.txt";
