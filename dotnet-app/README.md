@@ -117,7 +117,9 @@ When one order stalls for a long time, enable targeted tracing in `Prenos`:
   "EnableSapCallTrace": true,
   "SapCallWarnMs": 1500,
   "SapWaitWarnMs": 500,
-  "OrderTraceWarnMs": 3000
+  "OrderTraceWarnMs": 3000,
+  "EnableDiagnosticsFileLog": true,
+  "DiagnosticsLogFilePattern": "diagnostics-{timestamp}.log"
 }
 ```
 
@@ -128,6 +130,7 @@ What you get in console/output logs:
   - `resultCount` and context (`order`, `confirmation`, `subOrder`, ...).
 - `ORDER_TRACE ...` for slow orders or orders that trigger semi-finished recursion.
 - `ORDER_DIAG ...` with ThreadPool usage + GC counters at the moment a slow order is reported.
+- `output/diagnostics-*.log` with the same diagnostic lines persisted incrementally (safe to send even when you stop the run mid-way).
 
 Interpretation quick guide:
 - high `waitMs`, low `elapsedMs` => local throttling/concurrency bottleneck (`OrderConcurrency`/`MaxSapCallsInFlight`);
