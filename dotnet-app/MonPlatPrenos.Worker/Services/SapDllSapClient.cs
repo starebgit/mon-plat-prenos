@@ -350,7 +350,6 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.OrderHeader.SystemStatus,
             _fieldMap.OrderHeader.PlannedQuantity,
             _fieldMap.OrderHeader.StartDate,
-            _fieldMap.OrderHeader.WorkCenter,
             _fieldMap.OrderHeader.Plant);
         IReadOnlyList<SapOrderHeader> results = _options.UseTypedHotPath
             ? ParseOrderHeadersByMaterialFast(orderHeader)
