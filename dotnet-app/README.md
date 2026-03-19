@@ -138,6 +138,20 @@ Interpretation quick guide:
 - low `waitMs`, high `elapsedMs` => SAP/backend/network latency;
 - many `GetProductionOrdersByMaterialFallback` + high `subOrders` => recursive expansion overhead;
 - frequent `ORDER_DIAG` with high worker usage / fast-growing GC counts => local runtime pressure.
+- `SAP_DEDUP_SKIP ...` / high `semiDedupSkips` => Delphi-style pre-check prevented repeated `Samot` expansion for the same semi-material within one plate order.
+
+## Delphi-parity semi-finished behavior
+
+The worker now follows Delphi parity for the expensive semi-finished branch:
+- `Samot` still resolves sub-orders and AFRU deltas,
+- repeated `Samot` expansions for the same semi-material in one plate order are deduplicated (Delphi `Preverisam` style),
+- `obdelajUli` equivalent runs only for the **last** fetched `Samot` sub-order,
+- `Ulitki` classification is recorded, but no extra recursive AFRU expansion is performed,
+- `Protektor`/`Sponka`/`Obroc` stay as direct component categorization without additional SAP recursion.
+
+`Prenos:ApplyFromDateFilter` is now honored during the initial SAP order fetch:
+- `true` => applies resolved `fromDate` (smaller input set),
+- `false` => fetch scope `ALL` (legacy-wide scope, higher volume).
 
 ## Phase 3 confirmation/detail cleanup
 

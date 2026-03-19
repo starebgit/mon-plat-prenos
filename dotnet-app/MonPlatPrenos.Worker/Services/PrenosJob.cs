@@ -35,7 +35,7 @@ public sealed class PrenosJob
         var outputDirectory = GetOutputDirectoryPath();
         InitializeDiagnosticsLog(outputDirectory);
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
-        var activeFromDateFilter = (DateTime?)null;
+        var activeFromDateFilter = _options.ApplyFromDateFilter ? effectiveFromDate : null;
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
@@ -439,13 +439,16 @@ public sealed class PrenosJob
                     {
                         if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                         {
-                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
-                        }
-                        else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
-                                 || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
-                                 || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
-                        {
-                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 0);
+                            var semiKey = BuildSemiDedupKey(order.Plant, component.Material);
+                            if (orderContext.ProcessedSemiMaterials.Add(semiKey))
+                            {
+                                await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
+                            }
+                            else
+                            {
+                                trace.SemiDedupSkips++;
+                                WriteDiagnosticLine($"SAP_DEDUP_SKIP step=ObdelajSamot key={semiKey}");
+                            }
                         }
                     }
 
@@ -464,7 +467,7 @@ public sealed class PrenosJob
                     $"ORDER_TRACE order={order.OrderNumber} elapsedMs={orderSw.ElapsedMilliseconds} " +
                     $"semiCalls={trace.SemiExpansionCalls} fallbackCalls={trace.SemiFallbackCalls} " +
                     $"subOrders={trace.SubOrdersRead} afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls} " +
-                    $"subOrderCacheHits={trace.SubOrderCacheHits} afruCacheHits={trace.AfruCacheHits}");
+                    $"subOrderCacheHits={trace.SubOrderCacheHits} afruCacheHits={trace.AfruCacheHits} semiDedupSkips={trace.SemiDedupSkips}");
             }
             Interlocked.Increment(ref progress.Processed);
         }
@@ -516,9 +519,11 @@ public sealed class PrenosJob
     {
         var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 0);
 
-        foreach (var samotOrder in samotOrders)
+        // Delphi parity: obdelajUli is called only for the last fetched samot work order.
+        var lastSamotOrder = samotOrders.LastOrDefault();
+        if (lastSamotOrder is not null)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, lastSamotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
         }
     }
 
@@ -664,7 +669,27 @@ public sealed class PrenosJob
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 1);
+                // Delphi parity: ULITEK branch records item classification but does not recurse into AFRU expansion.
+                semiFinished.Add(new SemiFinishedTrace(
+                    plateOrder.OrderNumber,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
+                    "Ulitki",
+                    FormatMaterialLikeDelphi(cmp.Material),
+                    samotOrder.OrderNumber,
+                    0,
+                    DateTime.UtcNow));
+                stats.SemiFinishedRowsWritten++;
+
+                unified.Add(new UnifiedItem(
+                    plateOrder.OrderNumber,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
+                    FormatMaterialLikeDelphi(cmp.Material),
+                    cmp.Description,
+                    "Ulitki",
+                    0,
+                    DateTime.UtcNow));
+                stats.UnifiedRowsWritten++;
+                stats.AddCategoryHit("Ulitki");
                 continue;
             }
 
@@ -1160,6 +1185,9 @@ public sealed class PrenosJob
     private static string BuildAfruCacheKey(string orderNumber, DateTime startDate)
         => $"order={orderNumber}|start={startDate:yyyy-MM-dd}";
 
+    private static string BuildSemiDedupKey(string plant, string semiMaterial)
+        => $"plant={plant}|semiMaterial={semiMaterial.Trim()}";
+
     private static string EmitSlowOrderDiagnostics(string orderNumber, long elapsedMs)
     {
         ThreadPool.GetAvailableThreads(out var availableWorkers, out var availableIocp);
@@ -1390,6 +1418,7 @@ public sealed class PrenosJob
         public int ComponentExpansionCalls;
         public int SubOrderCacheHits;
         public int AfruCacheHits;
+        public int SemiDedupSkips;
 
         public bool HasSapExpansion => SemiExpansionCalls > 0 || AfruCalls > 0 || SubOrdersRead > 0;
     }
@@ -1398,6 +1427,7 @@ public sealed class PrenosJob
     {
         public Dictionary<string, IReadOnlyList<SapOrderHeader>> SubOrderCache { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, int> AfruCache { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> ProcessedSemiMaterials { get; } = new(StringComparer.Ordinal);
     }
 
     private static string BuildProgressBar(int current, int total, int width)
