@@ -441,12 +441,6 @@ public sealed class PrenosJob
                         {
                             await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
                         }
-                        else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
-                                 || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
-                                 || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
-                        {
-                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 0);
-                        }
                     }
 
                     break;
@@ -516,9 +510,11 @@ public sealed class PrenosJob
     {
         var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 0);
 
-        foreach (var samotOrder in samotOrders)
+        // Delphi parity: obdelajUli is called only for the last fetched samot work order.
+        var lastSamotOrder = samotOrders.LastOrDefault();
+        if (lastSamotOrder is not null)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, lastSamotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
         }
     }
 
@@ -664,7 +660,27 @@ public sealed class PrenosJob
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 1);
+                // Delphi parity: ULITEK branch records item classification but does not recurse into AFRU expansion.
+                semiFinished.Add(new SemiFinishedTrace(
+                    plateOrder.OrderNumber,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
+                    "Ulitki",
+                    FormatMaterialLikeDelphi(cmp.Material),
+                    samotOrder.OrderNumber,
+                    0,
+                    DateTime.UtcNow));
+                stats.SemiFinishedRowsWritten++;
+
+                unified.Add(new UnifiedItem(
+                    plateOrder.OrderNumber,
+                    FormatMaterialLikeDelphi(plateOrder.Material),
+                    FormatMaterialLikeDelphi(cmp.Material),
+                    cmp.Description,
+                    "Ulitki",
+                    0,
+                    DateTime.UtcNow));
+                stats.UnifiedRowsWritten++;
+                stats.AddCategoryHit("Ulitki");
                 continue;
             }
 

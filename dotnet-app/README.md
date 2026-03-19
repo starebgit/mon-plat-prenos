@@ -139,6 +139,14 @@ Interpretation quick guide:
 - many `GetProductionOrdersByMaterialFallback` + high `subOrders` => recursive expansion overhead;
 - frequent `ORDER_DIAG` with high worker usage / fast-growing GC counts => local runtime pressure.
 
+## Delphi-parity semi-finished behavior
+
+The worker now follows Delphi parity for the expensive semi-finished branch:
+- `Samot` still resolves sub-orders and AFRU deltas,
+- `obdelajUli` equivalent runs only for the **last** fetched `Samot` sub-order,
+- `Ulitki` classification is recorded, but no extra recursive AFRU expansion is performed,
+- `Protektor`/`Sponka`/`Obroc` stay as direct component categorization without additional SAP recursion.
+
 ## Phase 3 confirmation/detail cleanup
 
 Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
