@@ -108,6 +108,51 @@ Use these knobs to safely parallelize order processing:
 
 Start with conservative values (for example `OrderConcurrency=3`, `MaxSapCallsInFlight=6`) and use benchmark snapshots to tune.
 
+## Slow-transfer diagnostics (Delphi parity investigation)
+
+When one order stalls for a long time, enable targeted tracing in `Prenos`:
+
+```json
+"Prenos": {
+  "EnableSapCallTrace": true,
+  "SapCallWarnMs": 1500,
+  "SapWaitWarnMs": 500,
+  "OrderTraceWarnMs": 3000,
+  "EnableDiagnosticsFileLog": true,
+  "DiagnosticsLogFilePattern": "diagnostics-{timestamp}.log"
+}
+```
+
+What you get in console/output logs:
+- `SAP_CALL_TRACE ...` for each slow SAP call (or all calls when `EnableSapCallTrace=true`), including:
+  - `waitMs` → semaphore wait (queueing/parallelism pressure),
+  - `elapsedMs` → actual SAP call duration,
+  - `resultCount` and context (`order`, `confirmation`, `subOrder`, ...).
+- `ORDER_TRACE ...` for slow orders or orders that trigger semi-finished recursion.
+- `ORDER_DIAG ...` with ThreadPool usage + GC counters at the moment a slow order is reported.
+- `SAP_CACHE_HIT ...` when the worker reuses already fetched sub-order/AFRU data within the same plate order (prevents repeated fallback calls for identical keys).
+- `output/diagnostics-*.log` with the same diagnostic lines persisted incrementally (safe to send even when you stop the run mid-way).
+
+Interpretation quick guide:
+- high `waitMs`, low `elapsedMs` => local throttling/concurrency bottleneck (`OrderConcurrency`/`MaxSapCallsInFlight`);
+- low `waitMs`, high `elapsedMs` => SAP/backend/network latency;
+- many `GetProductionOrdersByMaterialFallback` + high `subOrders` => recursive expansion overhead;
+- frequent `ORDER_DIAG` with high worker usage / fast-growing GC counts => local runtime pressure.
+- `SAP_DEDUP_SKIP ...` / high `semiDedupSkips` => Delphi-style pre-check prevented repeated `Samot` expansion for the same semi-material within one plate order.
+
+## Delphi-parity semi-finished behavior
+
+The worker now follows Delphi parity for the expensive semi-finished branch:
+- `Samot` still resolves sub-orders and AFRU deltas,
+- repeated `Samot` expansions for the same semi-material in one plate order are deduplicated (Delphi `Preverisam` style),
+- `obdelajUli` equivalent runs only for the **last** fetched `Samot` sub-order,
+- `Ulitki` classification is recorded, but no extra recursive AFRU expansion is performed,
+- `Protektor`/`Sponka`/`Obroc` stay as direct component categorization without additional SAP recursion.
+
+`Prenos:ApplyFromDateFilter` is now honored during the initial SAP order fetch:
+- `true` => applies resolved `fromDate` (smaller input set),
+- `false` => fetch scope `ALL` (legacy-wide scope, higher volume).
+
 ## Phase 3 confirmation/detail cleanup
 
 Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
