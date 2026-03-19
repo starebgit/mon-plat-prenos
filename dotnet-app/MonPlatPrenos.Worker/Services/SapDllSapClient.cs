@@ -293,8 +293,7 @@ public sealed class SapDllSapClient : ISapClient
         var confirmationsTable = GetTable(listFunction, "CONFIRMATIONS");
         ValidateFieldsOnce("BAPI_PRODORDCONF_GETLIST.CONFIRMATIONS", confirmationsTable,
             _fieldMap.Confirmation.Confirmation,
-            _fieldMap.Confirmation.ConfirmationCounter,
-            _fieldMap.Confirmation.Yield);
+            _fieldMap.Confirmation.ConfirmationCounter);
 
         IReadOnlyList<SapConfirmation> results = _options.UseTypedHotPath
             ? ParseConfirmationsFast(confirmationsTable)
