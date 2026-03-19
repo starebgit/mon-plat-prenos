@@ -293,8 +293,7 @@ public sealed class SapDllSapClient : ISapClient
         var confirmationsTable = GetTable(listFunction, "CONFIRMATIONS");
         ValidateFieldsOnce("BAPI_PRODORDCONF_GETLIST.CONFIRMATIONS", confirmationsTable,
             _fieldMap.Confirmation.Confirmation,
-            _fieldMap.Confirmation.ConfirmationCounter,
-            _fieldMap.Confirmation.Yield);
+            _fieldMap.Confirmation.ConfirmationCounter);
 
         IReadOnlyList<SapConfirmation> results = _options.UseTypedHotPath
             ? ParseConfirmationsFast(confirmationsTable)
@@ -351,7 +350,6 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.OrderHeader.SystemStatus,
             _fieldMap.OrderHeader.PlannedQuantity,
             _fieldMap.OrderHeader.StartDate,
-            _fieldMap.OrderHeader.WorkCenter,
             _fieldMap.OrderHeader.Plant);
         IReadOnlyList<SapOrderHeader> results = _options.UseTypedHotPath
             ? ParseOrderHeadersByMaterialFast(orderHeader)
