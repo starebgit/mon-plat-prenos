@@ -130,6 +130,7 @@ What you get in console/output logs:
   - `resultCount` and context (`order`, `confirmation`, `subOrder`, ...).
 - `ORDER_TRACE ...` for slow orders or orders that trigger semi-finished recursion.
 - `ORDER_DIAG ...` with ThreadPool usage + GC counters at the moment a slow order is reported.
+- `SAP_CACHE_HIT ...` when the worker reuses already fetched sub-order/AFRU data within the same plate order (prevents repeated fallback calls for identical keys).
 - `output/diagnostics-*.log` with the same diagnostic lines persisted incrementally (safe to send even when you stop the run mid-way).
 
 Interpretation quick guide:

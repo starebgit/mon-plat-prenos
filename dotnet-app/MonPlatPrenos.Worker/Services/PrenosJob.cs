@@ -300,6 +300,7 @@ public sealed class PrenosJob
     {
         var orderSw = Stopwatch.StartNew();
         var trace = new OrderTrace(order.OrderNumber);
+        var orderContext = new OrderExecutionContext();
         var result = new OrderProcessingResult(orderIndex);
         var stats = result.Stats;
         Interlocked.Increment(ref progress.Started);
@@ -438,13 +439,13 @@ public sealed class PrenosJob
                     {
                         if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                         {
-                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, cancellationToken);
+                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
                         }
                         else if (rule.Name.Equals("Protektor", StringComparison.OrdinalIgnoreCase)
                                  || rule.Name.Equals("Sponka", StringComparison.OrdinalIgnoreCase)
                                  || rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
                         {
-                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, cancellationToken, depth: 0);
+                            await ObdelajPolIzdAsync(order, component, rule.Name, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 0);
                         }
                     }
 
@@ -462,7 +463,8 @@ public sealed class PrenosJob
                 WriteDiagnosticLine(
                     $"ORDER_TRACE order={order.OrderNumber} elapsedMs={orderSw.ElapsedMilliseconds} " +
                     $"semiCalls={trace.SemiExpansionCalls} fallbackCalls={trace.SemiFallbackCalls} " +
-                    $"subOrders={trace.SubOrdersRead} afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls}");
+                    $"subOrders={trace.SubOrdersRead} afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls} " +
+                    $"subOrderCacheHits={trace.SubOrderCacheHits} afruCacheHits={trace.AfruCacheHits}");
             }
             Interlocked.Increment(ref progress.Processed);
         }
@@ -509,13 +511,14 @@ public sealed class PrenosJob
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
         OrderTrace trace,
+        OrderExecutionContext orderContext,
         CancellationToken cancellationToken)
     {
-        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, trace, cancellationToken, depth: 0);
+        var samotOrders = await ObdelajPolIzdAsync(plateOrder, samotComponent, "Samot", semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 0);
 
         foreach (var samotOrder in samotOrders)
         {
-            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, cancellationToken);
+            await ObdelajUliAsync(plateOrder, samotComponent, samotOrder, semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
         }
     }
 
@@ -529,6 +532,7 @@ public sealed class PrenosJob
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
         OrderTrace trace,
+        OrderExecutionContext orderContext,
         CancellationToken cancellationToken,
         int depth)
     {
@@ -538,45 +542,75 @@ public sealed class PrenosJob
         }
         trace.SemiExpansionCalls++;
 
-        var subOrders = await TimedSapCallAsync(
-            timing,
-            "GetProductionOrdersByMaterial",
-            $"plateOrder={plateOrder.OrderNumber},semiMaterial={semiComponent.Material},excludeOrder={plateOrder.OrderNumber}",
-            sapCallSemaphore,
-            cancellationToken,
-            () => _sapClient.GetProductionOrdersByMaterialAsync(
-                plateOrder.Plant,
-                semiComponent.Material,
-                plateOrder.OrderNumber,
-                cancellationToken));
-
-        if (subOrders.Count == 0)
+        var primaryKey = BuildSubOrderCacheKey(plateOrder.Plant, semiComponent.Material, plateOrder.OrderNumber);
+        if (!orderContext.SubOrderCache.TryGetValue(primaryKey, out var subOrders))
         {
-            trace.SemiFallbackCalls++;
             subOrders = await TimedSapCallAsync(
                 timing,
-                "GetProductionOrdersByMaterialFallback",
-                $"plateOrder={plateOrder.OrderNumber},semiMaterial={semiComponent.Material},excludeOrder=null",
+                "GetProductionOrdersByMaterial",
+                $"plateOrder={plateOrder.OrderNumber},semiMaterial={semiComponent.Material},excludeOrder={plateOrder.OrderNumber}",
                 sapCallSemaphore,
                 cancellationToken,
                 () => _sapClient.GetProductionOrdersByMaterialAsync(
                     plateOrder.Plant,
                     semiComponent.Material,
-                    null,
+                    plateOrder.OrderNumber,
                     cancellationToken));
+            orderContext.SubOrderCache[primaryKey] = subOrders;
+        }
+        else
+        {
+            trace.SubOrderCacheHits++;
+            WriteDiagnosticLine($"SAP_CACHE_HIT step=GetProductionOrdersByMaterial key={primaryKey} resultCount={subOrders.Count}");
+        }
+
+        if (subOrders.Count == 0)
+        {
+            trace.SemiFallbackCalls++;
+            var fallbackKey = BuildSubOrderCacheKey(plateOrder.Plant, semiComponent.Material, null);
+            if (!orderContext.SubOrderCache.TryGetValue(fallbackKey, out subOrders))
+            {
+                subOrders = await TimedSapCallAsync(
+                    timing,
+                    "GetProductionOrdersByMaterialFallback",
+                    $"plateOrder={plateOrder.OrderNumber},semiMaterial={semiComponent.Material},excludeOrder=null",
+                    sapCallSemaphore,
+                    cancellationToken,
+                    () => _sapClient.GetProductionOrdersByMaterialAsync(
+                        plateOrder.Plant,
+                        semiComponent.Material,
+                        null,
+                        cancellationToken));
+                orderContext.SubOrderCache[fallbackKey] = subOrders;
+            }
+            else
+            {
+                trace.SubOrderCacheHits++;
+                WriteDiagnosticLine($"SAP_CACHE_HIT step=GetProductionOrdersByMaterialFallback key={fallbackKey} resultCount={subOrders.Count}");
+            }
         }
         trace.SubOrdersRead += subOrders.Count;
 
         foreach (var subOrder in subOrders)
         {
             trace.AfruCalls++;
-            var afruDelta = await TimedSapCallAsync(
-                timing,
-                "GetAfruYieldDelta",
-                $"plateOrder={plateOrder.OrderNumber},subOrder={subOrder.OrderNumber}",
-                sapCallSemaphore,
-                cancellationToken,
-                () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
+            var afruKey = BuildAfruCacheKey(subOrder.OrderNumber, subOrder.StartDate);
+            if (!orderContext.AfruCache.TryGetValue(afruKey, out var afruDelta))
+            {
+                afruDelta = await TimedSapCallAsync(
+                    timing,
+                    "GetAfruYieldDelta",
+                    $"plateOrder={plateOrder.OrderNumber},subOrder={subOrder.OrderNumber}",
+                    sapCallSemaphore,
+                    cancellationToken,
+                    () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
+                orderContext.AfruCache[afruKey] = afruDelta;
+            }
+            else
+            {
+                trace.AfruCacheHits++;
+                WriteDiagnosticLine($"SAP_CACHE_HIT step=GetAfruYieldDelta key={afruKey} resultValue={afruDelta}");
+            }
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
@@ -613,6 +647,7 @@ public sealed class PrenosJob
         TimingCollector timing,
         SemaphoreSlim sapCallSemaphore,
         OrderTrace trace,
+        OrderExecutionContext orderContext,
         CancellationToken cancellationToken)
     {
         trace.ComponentExpansionCalls++;
@@ -629,7 +664,7 @@ public sealed class PrenosJob
         {
             if (cmp.Description.IndexOf("ULITEK", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, trace, cancellationToken, depth: 1);
+                await ObdelajPolIzdAsync(plateOrder, cmp, "Ulitki", semiFinished, unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken, depth: 1);
                 continue;
             }
 
@@ -1119,6 +1154,12 @@ public sealed class PrenosJob
         return null;
     }
 
+    private static string BuildSubOrderCacheKey(string plant, string material, string? excludeOrder)
+        => $"plant={plant}|material={material}|exclude={excludeOrder ?? "<null>"}";
+
+    private static string BuildAfruCacheKey(string orderNumber, DateTime startDate)
+        => $"order={orderNumber}|start={startDate:yyyy-MM-dd}";
+
     private static string EmitSlowOrderDiagnostics(string orderNumber, long elapsedMs)
     {
         ThreadPool.GetAvailableThreads(out var availableWorkers, out var availableIocp);
@@ -1347,8 +1388,16 @@ public sealed class PrenosJob
         public int SubOrdersRead;
         public int AfruCalls;
         public int ComponentExpansionCalls;
+        public int SubOrderCacheHits;
+        public int AfruCacheHits;
 
         public bool HasSapExpansion => SemiExpansionCalls > 0 || AfruCalls > 0 || SubOrdersRead > 0;
+    }
+
+    private sealed class OrderExecutionContext
+    {
+        public Dictionary<string, IReadOnlyList<SapOrderHeader>> SubOrderCache { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> AfruCache { get; } = new(StringComparer.Ordinal);
     }
 
     private static string BuildProgressBar(int current, int total, int width)
