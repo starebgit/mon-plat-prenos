@@ -108,6 +108,33 @@ Use these knobs to safely parallelize order processing:
 
 Start with conservative values (for example `OrderConcurrency=3`, `MaxSapCallsInFlight=6`) and use benchmark snapshots to tune.
 
+## Slow-transfer diagnostics (Delphi parity investigation)
+
+When one order stalls for a long time, enable targeted tracing in `Prenos`:
+
+```json
+"Prenos": {
+  "EnableSapCallTrace": true,
+  "SapCallWarnMs": 1500,
+  "SapWaitWarnMs": 500,
+  "OrderTraceWarnMs": 3000
+}
+```
+
+What you get in console/output logs:
+- `SAP_CALL_TRACE ...` for each slow SAP call (or all calls when `EnableSapCallTrace=true`), including:
+  - `waitMs` → semaphore wait (queueing/parallelism pressure),
+  - `elapsedMs` → actual SAP call duration,
+  - `resultCount` and context (`order`, `confirmation`, `subOrder`, ...).
+- `ORDER_TRACE ...` for slow orders or orders that trigger semi-finished recursion.
+- `ORDER_DIAG ...` with ThreadPool usage + GC counters at the moment a slow order is reported.
+
+Interpretation quick guide:
+- high `waitMs`, low `elapsedMs` => local throttling/concurrency bottleneck (`OrderConcurrency`/`MaxSapCallsInFlight`);
+- low `waitMs`, high `elapsedMs` => SAP/backend/network latency;
+- many `GetProductionOrdersByMaterialFallback` + high `subOrders` => recursive expansion overhead;
+- frequent `ORDER_DIAG` with high worker usage / fast-growing GC counts => local runtime pressure.
+
 ## Phase 3 confirmation/detail cleanup
 
 Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
