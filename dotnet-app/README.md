@@ -108,6 +108,48 @@ Use these knobs to safely parallelize order processing:
 
 Start with conservative values (for example `OrderConcurrency=3`, `MaxSapCallsInFlight=6`) and use benchmark snapshots to tune.
 
+## Slow-transfer diagnostics (Delphi parity investigation)
+
+When one order stalls for a long time, enable targeted tracing in `Prenos`:
+
+```json
+"Prenos": {
+  "EnableSapCallTrace": true,
+  "SapCallWarnMs": 1500,
+  "SapWaitWarnMs": 500,
+  "OrderTraceWarnMs": 3000,
+  "EnableDiagnosticsFileLog": true,
+  "DiagnosticsLogFilePattern": "diagnostics-{timestamp}.log"
+}
+```
+
+What you get in console/output logs:
+- `SAP_CALL_TRACE ...` for each slow SAP call (or all calls when `EnableSapCallTrace=true`), including:
+  - `waitMs` → semaphore wait (queueing/parallelism pressure),
+  - `elapsedMs` → actual SAP call duration,
+  - `resultCount` and context (`order`, `confirmation`, `subOrder`, ...).
+- `ORDER_TRACE ...` for slow orders or orders that trigger semi-finished recursion.
+- `ORDER_DIAG ...` with ThreadPool usage + GC counters at the moment a slow order is reported.
+- `SAP_CACHE_HIT ...` when the worker reuses already fetched sub-order/AFRU data within the same plate order (prevents repeated fallback calls for identical keys).
+- `output/diagnostics-*.log` with the same diagnostic lines persisted incrementally (safe to send even when you stop the run mid-way).
+
+Interpretation quick guide:
+- high `waitMs`, low `elapsedMs` => local throttling/concurrency bottleneck (`OrderConcurrency`/`MaxSapCallsInFlight`);
+- low `waitMs`, high `elapsedMs` => SAP/backend/network latency;
+- many `GetProductionOrdersByMaterialFallback` + high `subOrders` => recursive expansion overhead;
+- frequent `ORDER_DIAG` with high worker usage / fast-growing GC counts => local runtime pressure.
+- `SAP_DEDUP_SKIP ...` / high `semiDedupSkips` => Delphi-style pre-check prevented repeated `Samot` expansion for the same semi-material within one plate order.
+- high `subOrdersSkippedByStatus` in `ORDER_TRACE` => Delphi-style skip of technically-closed (`TEHZ`/`ZAKL`) sub-orders before AFRU calls.
+
+## Delphi-parity semi-finished behavior
+
+The worker now follows Delphi parity for the expensive semi-finished branch:
+- `Samot` still resolves sub-orders and AFRU deltas,
+- repeated `Samot` expansions for the same semi-material in one plate order are deduplicated (Delphi `Preverisam` style),
+- `obdelajUli` equivalent runs only for the **last** fetched `Samot` sub-order,
+- `Ulitki` classification is recorded, but no extra recursive AFRU expansion is performed,
+- `Protektor`/`Sponka`/`Obroc` stay as direct component categorization without additional SAP recursion.
+
 ## Phase 3 confirmation/detail cleanup
 
 Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
@@ -115,7 +157,6 @@ Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/f
 ## Phase 4 call-volume reduction
 
 Phase 4 adds two business-safe volume controls:
-- `Prenos:EnableSemiFinishedExpansion` (default `true`): when `false`, skips recursive semi-finished SAP expansion (`Samot/Protektor/Sponka/Obroc/Ulitki`), keeping only direct plate-component matching.
 - `Prenos:Watermark`:
   - `Enabled`: when `true`, uses and updates a persisted order watermark to move `OrderFrom` forward between runs,
   - `FilePath`: watermark file path (default `output/orderfrom.watermark.txt`).
@@ -171,10 +212,6 @@ When `ParityBenchmarkMode.Enabled=true`, the worker automatically:
 - forces benchmark snapshot generation even if `Prenos:Benchmark:Enabled=false`,
 - disables watermark movement (same behavior as parity mode),
 - writes an execution summary log: `output/parity-benchmark-run-*.log`.
-
-`Prenos:ApplyFromDateFilter` controls whether `fromDate` is actually applied during plate-order processing:
-- `true` (default): apply `fromDate` filter (parity/date-limited behavior),
-- `false`: ignore date filtering and behave like legacy Delphi fetch scope (larger order set, no date cut).
 
 Run it directly:
 
