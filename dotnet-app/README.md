@@ -22,7 +22,7 @@ Runtime alignment: `net8.0` worker + `sapnco.dll` / `sapnco_utils.dll` paths fro
 
 ```bash
 cd dotnet-app/MonPlatPrenos.Worker
-# one-time run: prints SAP login check and executes prenos for one day (today by default):
+# one-time run: prints SAP login check and executes prenos:
 dotnet run -- --run-once
 # if you already built once and want to avoid build/roslyn noise:
 dotnet run --no-build -- --run-once
@@ -34,7 +34,7 @@ dotnet run -- --run-once --from-date 2026-03-11
 dotnet run
 ```
 
-When using `--run-once`, `--from-date` is optional and sets the one-day run date (`DateTime.Today` when omitted). `--to-date` is ignored.
+When using `--run-once`, `--from-date` is accepted for compatibility/log metadata but SAP order fetching is not date-limited in current behavior. `--to-date` is ignored.
 
 
 ## Visual Studio (F5) run-once
@@ -456,7 +456,7 @@ Run these checks as migration gates:
 
 1. `Debug|x64` and `Release|x64` build pass.
 2. `--run-once` reaches destination creation without loader exceptions.
-3. One-day replay (`--from-date`) produces expected output files.
+3. Replay (`--from-date`) produces expected output files (date currently does not restrict SAP fetch set).
 4. Scheduled mode starts and logs next-run behavior correctly.
 
 ### 7) Rollout strategy
