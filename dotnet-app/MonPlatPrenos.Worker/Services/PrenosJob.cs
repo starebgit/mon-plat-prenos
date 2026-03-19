@@ -15,6 +15,8 @@ public sealed class PrenosJob
 {
     private readonly ISapClient _sapClient;
     private readonly PrenosOptions _options;
+    private readonly object _diagnosticsLogSync = new object();
+    private string? _diagnosticsLogPath;
     public PrenosJob(ISapClient sapClient, IOptions<PrenosOptions> options)
     {
         _sapClient = sapClient;
@@ -31,6 +33,7 @@ public sealed class PrenosJob
         var parityModeEnabled = _options.ParityMode.Enabled || parityBenchmarkModeEnabled;
         var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
         var outputDirectory = GetOutputDirectoryPath();
+        InitializeDiagnosticsLog(outputDirectory);
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
         var activeFromDateFilter = (DateTime?)null;
 
@@ -39,6 +42,10 @@ public sealed class PrenosJob
         Console.WriteLine($"Run mode: {(parityBenchmarkModeEnabled ? "PARITY-BENCHMARK" : parityModeEnabled ? "PARITY" : "NORMAL")}");
         Console.WriteLine($"Output directory: {outputDirectory}");
         Console.WriteLine($"Effective fromDate: {(activeFromDateFilter.HasValue ? activeFromDateFilter.Value.ToString("yyyy-MM-dd") : "ALL")}, orderFrom: {orderFrom}");
+        if (!string.IsNullOrWhiteSpace(_diagnosticsLogPath))
+        {
+            Console.WriteLine($"Diagnostics log: {_diagnosticsLogPath}");
+        }
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
@@ -311,7 +318,13 @@ public sealed class PrenosJob
             }
 
             stats.OrdersAfterCoreFilters++;
-            var operations = await TimedSapCallAsync(timing, "GetOperations", sapCallSemaphore, cancellationToken, () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
+            var operations = await TimedSapCallAsync(
+                timing,
+                "GetOperations",
+                $"order={order.OrderNumber}",
+                sapCallSemaphore,
+                cancellationToken,
+                () => _sapClient.GetOperationsAsync(order.OrderNumber, cancellationToken));
             var validOperations = operations
                 .Where(o => operationCodes.Contains(o.OperationCode))
                 .Where(o => o.ConfirmableQty > 0)
@@ -334,7 +347,13 @@ public sealed class PrenosJob
             {
                 foreach (var op in validOperations)
                 {
-                    var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
+                        var confirmations = await TimedSapCallAsync(
+                            timing,
+                            "GetConfirmations",
+                            $"order={order.OrderNumber},confirmation={op.Confirmation}",
+                            sapCallSemaphore,
+                            cancellationToken,
+                            () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
                     stats.ConfirmationRowsRead += confirmations.Count;
                     totalYield += confirmations.Sum(c => c.Yield);
                 }
@@ -347,7 +366,13 @@ public sealed class PrenosJob
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
                     try
                     {
-                        var confirmations = await TimedSapCallAsync(timing, "GetConfirmations", sapCallSemaphore, cancellationToken, () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
+                        var confirmations = await TimedSapCallAsync(
+                            timing,
+                            "GetConfirmations",
+                            $"order={order.OrderNumber},confirmation={op.Confirmation}",
+                            sapCallSemaphore,
+                            cancellationToken,
+                            () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
                         return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
                     }
                     finally
@@ -379,7 +404,13 @@ public sealed class PrenosJob
             result.PlateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
             stats.PlateRecordsWritten++;
 
-            var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
+            var components = await TimedSapCallAsync(
+                timing,
+                "GetComponents",
+                $"order={order.OrderNumber}",
+                sapCallSemaphore,
+                cancellationToken,
+                () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
             stats.ComponentRowsRead += components.Count;
 
             foreach (var component in components)
@@ -425,9 +456,10 @@ public sealed class PrenosJob
         }
         finally
         {
-            if (trace.HasSapExpansion || orderSw.ElapsedMilliseconds >= 5000)
+            if (trace.HasSapExpansion || orderSw.ElapsedMilliseconds >= Math.Max(1, _options.OrderTraceWarnMs))
             {
-                Console.WriteLine(
+                WriteDiagnosticLine(EmitSlowOrderDiagnostics(order.OrderNumber, orderSw.ElapsedMilliseconds));
+                WriteDiagnosticLine(
                     $"ORDER_TRACE order={order.OrderNumber} elapsedMs={orderSw.ElapsedMilliseconds} " +
                     $"semiCalls={trace.SemiExpansionCalls} fallbackCalls={trace.SemiFallbackCalls} " +
                     $"subOrders={trace.SubOrdersRead} afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls}");
@@ -509,6 +541,7 @@ public sealed class PrenosJob
         var subOrders = await TimedSapCallAsync(
             timing,
             "GetProductionOrdersByMaterial",
+            $"plateOrder={plateOrder.OrderNumber},semiMaterial={semiComponent.Material},excludeOrder={plateOrder.OrderNumber}",
             sapCallSemaphore,
             cancellationToken,
             () => _sapClient.GetProductionOrdersByMaterialAsync(
@@ -523,6 +556,7 @@ public sealed class PrenosJob
             subOrders = await TimedSapCallAsync(
                 timing,
                 "GetProductionOrdersByMaterialFallback",
+                $"plateOrder={plateOrder.OrderNumber},semiMaterial={semiComponent.Material},excludeOrder=null",
                 sapCallSemaphore,
                 cancellationToken,
                 () => _sapClient.GetProductionOrdersByMaterialAsync(
@@ -536,7 +570,13 @@ public sealed class PrenosJob
         foreach (var subOrder in subOrders)
         {
             trace.AfruCalls++;
-            var afruDelta = await TimedSapCallAsync(timing, "GetAfruYieldDelta", sapCallSemaphore, cancellationToken, () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
+            var afruDelta = await TimedSapCallAsync(
+                timing,
+                "GetAfruYieldDelta",
+                $"plateOrder={plateOrder.OrderNumber},subOrder={subOrder.OrderNumber}",
+                sapCallSemaphore,
+                cancellationToken,
+                () => _sapClient.GetAfruYieldDeltaAsync(subOrder.OrderNumber, subOrder.StartDate, cancellationToken));
 
             semiFinished.Add(new SemiFinishedTrace(
                 plateOrder.OrderNumber,
@@ -576,7 +616,13 @@ public sealed class PrenosJob
         CancellationToken cancellationToken)
     {
         trace.ComponentExpansionCalls++;
-        var components = await TimedSapCallAsync(timing, "GetComponents", sapCallSemaphore, cancellationToken, () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
+        var components = await TimedSapCallAsync(
+            timing,
+            "GetComponents",
+            $"plateOrder={plateOrder.OrderNumber},samotOrder={samotOrder.OrderNumber}",
+            sapCallSemaphore,
+            cancellationToken,
+            () => _sapClient.GetComponentsAsync(samotOrder.OrderNumber, cancellationToken));
         stats.ComponentRowsRead += components.Count;
 
         foreach (var cmp in components)
@@ -997,21 +1043,139 @@ public sealed class PrenosJob
             || string.Equals(prefix, "ZAKL", StringComparison.Ordinal);
     }
 
-    private static async Task<T> TimedSapCallAsync<T>(
+    private async Task<T> TimedSapCallAsync<T>(
         TimingCollector collector,
         string step,
+        string context,
         SemaphoreSlim sapCallSemaphore,
         CancellationToken cancellationToken,
         Func<Task<T>> action)
     {
+        var waitSw = Stopwatch.StartNew();
         await sapCallSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var waitMs = waitSw.ElapsedMilliseconds;
         try
         {
-            return await TimedAsync(collector, step, action).ConfigureAwait(false);
+            var execSw = Stopwatch.StartNew();
+            var result = await TimedAsync(collector, step, action).ConfigureAwait(false);
+            var execMs = execSw.ElapsedMilliseconds;
+            WriteSapCallTrace(step, context, waitMs, execMs, TryGetResultCount(result), failed: false);
+            return result;
+        }
+        catch
+        {
+            WriteSapCallTrace(step, context, waitMs, elapsedMs: null, resultCount: null, failed: true);
+            throw;
         }
         finally
         {
             sapCallSemaphore.Release();
+        }
+    }
+
+    private void WriteSapCallTrace(string step, string context, long waitMs, long? elapsedMs, int? resultCount, bool failed)
+    {
+        var warnWaitMs = Math.Max(0, _options.SapWaitWarnMs);
+        var warnCallMs = Math.Max(0, _options.SapCallWarnMs);
+        var shouldLog = _options.EnableSapCallTrace
+            || waitMs >= warnWaitMs
+            || (elapsedMs.HasValue && elapsedMs.Value >= warnCallMs)
+            || failed;
+        if (!shouldLog)
+        {
+            return;
+        }
+
+        var state = failed ? "FAIL" : "OK";
+        var elapsedToken = elapsedMs.HasValue ? elapsedMs.Value.ToString() : "n/a";
+        var countToken = resultCount.HasValue ? resultCount.Value.ToString() : "n/a";
+        WriteDiagnosticLine($"SAP_CALL_TRACE step={step} state={state} waitMs={waitMs} elapsedMs={elapsedToken} resultCount={countToken} context=[{context}]");
+    }
+
+    private static int? TryGetResultCount<T>(T result)
+    {
+        if (result is null)
+        {
+            return null;
+        }
+
+        if (result is System.Collections.ICollection nonGenericCollection)
+        {
+            return nonGenericCollection.Count;
+        }
+
+        var resultType = result.GetType();
+        var countProperty = resultType.GetProperty("Count");
+        if (countProperty is null || countProperty.PropertyType != typeof(int))
+        {
+            return null;
+        }
+
+        if (countProperty.GetValue(result) is int count)
+        {
+            return count;
+        }
+
+        return null;
+    }
+
+    private static string EmitSlowOrderDiagnostics(string orderNumber, long elapsedMs)
+    {
+        ThreadPool.GetAvailableThreads(out var availableWorkers, out var availableIocp);
+        ThreadPool.GetMaxThreads(out var maxWorkers, out var maxIocp);
+        var usedWorkers = Math.Max(0, maxWorkers - availableWorkers);
+        var usedIocp = Math.Max(0, maxIocp - availableIocp);
+        var gc0 = GC.CollectionCount(0);
+        var gc1 = GC.CollectionCount(1);
+        var gc2 = GC.CollectionCount(2);
+        return
+            $"ORDER_DIAG order={orderNumber} elapsedMs={elapsedMs} " +
+            $"threadPoolWorkers={usedWorkers}/{maxWorkers} ioThreads={usedIocp}/{maxIocp} " +
+            $"gcCollections={gc0}/{gc1}/{gc2}";
+    }
+
+    private void InitializeDiagnosticsLog(string outputDirectory)
+    {
+        if (!_options.EnableDiagnosticsFileLog)
+        {
+            _diagnosticsLogPath = null;
+            return;
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var filePattern = string.IsNullOrWhiteSpace(_options.DiagnosticsLogFilePattern)
+            ? "diagnostics-{timestamp}.log"
+            : _options.DiagnosticsLogFilePattern;
+        var fileName = filePattern.Replace("{timestamp}", stamp);
+        _diagnosticsLogPath = Path.IsPathRooted(fileName)
+            ? fileName
+            : Path.Combine(outputDirectory, fileName);
+        var header = new[]
+        {
+            $"# diagnostics-log-start={DateTime.UtcNow:O}",
+            $"# machine={Environment.MachineName}",
+            $"# process={Environment.ProcessId}",
+            $"# orderConcurrency={Math.Max(1, _options.OrderConcurrency)}",
+            $"# maxSapCallsInFlight={Math.Max(1, _options.MaxSapCallsInFlight)}",
+            $"# sapCallWarnMs={Math.Max(0, _options.SapCallWarnMs)}",
+            $"# sapWaitWarnMs={Math.Max(0, _options.SapWaitWarnMs)}",
+            $"# orderTraceWarnMs={Math.Max(1, _options.OrderTraceWarnMs)}"
+        };
+        File.WriteAllText(_diagnosticsLogPath, string.Join(Environment.NewLine, header) + Environment.NewLine);
+    }
+
+    private void WriteDiagnosticLine(string message)
+    {
+        Console.WriteLine(message);
+        if (string.IsNullOrWhiteSpace(_diagnosticsLogPath))
+        {
+            return;
+        }
+
+        lock (_diagnosticsLogSync)
+        {
+            File.AppendAllText(_diagnosticsLogPath, message + Environment.NewLine);
         }
     }
 
