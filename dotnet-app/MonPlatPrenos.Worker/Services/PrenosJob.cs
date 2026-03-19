@@ -435,20 +435,17 @@ public sealed class PrenosJob
                     stats.UnifiedRowsWritten++;
                     stats.AddCategoryHit(rule.Name);
 
-                    if (_options.EnableSemiFinishedExpansion)
+                    if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
+                        var semiKey = BuildSemiDedupKey(order.Plant, component.Material);
+                        if (orderContext.ProcessedSemiMaterials.Add(semiKey))
                         {
-                            var semiKey = BuildSemiDedupKey(order.Plant, component.Material);
-                            if (orderContext.ProcessedSemiMaterials.Add(semiKey))
-                            {
-                                await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
-                            }
-                            else
-                            {
-                                trace.SemiDedupSkips++;
-                                WriteDiagnosticLine($"SAP_DEDUP_SKIP step=ObdelajSamot key={semiKey}");
-                            }
+                            await ObdelajSamotAsync(order, component, result.SemiFinished, result.Unified, stats, timing, sapCallSemaphore, trace, orderContext, cancellationToken);
+                        }
+                        else
+                        {
+                            trace.SemiDedupSkips++;
+                            WriteDiagnosticLine($"SAP_DEDUP_SKIP step=ObdelajSamot key={semiKey}");
                         }
                     }
 

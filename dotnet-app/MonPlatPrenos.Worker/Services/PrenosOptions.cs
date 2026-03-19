@@ -18,11 +18,9 @@ public sealed class PrenosOptions
     public int MaxSapCallsInFlight { get; set; } = 8;
     public string Plant { get; set; } = "1061";
     public string OrderFrom { get; set; } = "000005223286";
-    public bool ApplyFromDateFilter { get; set; } = true;
     public BenchmarkOptions Benchmark { get; set; } = new BenchmarkOptions();
     public ParityBenchmarkModeOptions ParityBenchmarkMode { get; set; } = new ParityBenchmarkModeOptions();
     public bool UseTypedHotPath { get; set; } = true;
-    public bool EnableSemiFinishedExpansion { get; set; } = true;
     public bool EnableSapCallTrace { get; set; }
     public int SapCallWarnMs { get; set; } = 2000;
     public int SapWaitWarnMs { get; set; } = 1000;

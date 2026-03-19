@@ -149,10 +149,6 @@ The worker now follows Delphi parity for the expensive semi-finished branch:
 - `Ulitki` classification is recorded, but no extra recursive AFRU expansion is performed,
 - `Protektor`/`Sponka`/`Obroc` stay as direct component categorization without additional SAP recursion.
 
-`Prenos:ApplyFromDateFilter` is now honored during the initial SAP order fetch:
-- `true` => applies resolved `fromDate` (smaller input set),
-- `false` => fetch scope `ALL` (legacy-wide scope, higher volume).
-
 ## Phase 3 confirmation/detail cleanup
 
 Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
@@ -160,7 +156,6 @@ Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/f
 ## Phase 4 call-volume reduction
 
 Phase 4 adds two business-safe volume controls:
-- `Prenos:EnableSemiFinishedExpansion` (default `true`): when `false`, skips recursive semi-finished SAP expansion (`Samot/Protektor/Sponka/Obroc/Ulitki`), keeping only direct plate-component matching.
 - `Prenos:Watermark`:
   - `Enabled`: when `true`, uses and updates a persisted order watermark to move `OrderFrom` forward between runs,
   - `FilePath`: watermark file path (default `output/orderfrom.watermark.txt`).
@@ -216,10 +211,6 @@ When `ParityBenchmarkMode.Enabled=true`, the worker automatically:
 - forces benchmark snapshot generation even if `Prenos:Benchmark:Enabled=false`,
 - disables watermark movement (same behavior as parity mode),
 - writes an execution summary log: `output/parity-benchmark-run-*.log`.
-
-`Prenos:ApplyFromDateFilter` controls whether `fromDate` is actually applied during plate-order processing:
-- `true` (default): apply `fromDate` filter (parity/date-limited behavior),
-- `false`: ignore date filtering and behave like legacy Delphi fetch scope (larger order set, no date cut).
 
 Run it directly:
 
