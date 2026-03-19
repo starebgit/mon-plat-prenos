@@ -139,6 +139,7 @@ Interpretation quick guide:
 - many `GetProductionOrdersByMaterialFallback` + high `subOrders` => recursive expansion overhead;
 - frequent `ORDER_DIAG` with high worker usage / fast-growing GC counts => local runtime pressure.
 - `SAP_DEDUP_SKIP ...` / high `semiDedupSkips` => Delphi-style pre-check prevented repeated `Samot` expansion for the same semi-material within one plate order.
+- high `subOrdersSkippedByStatus` in `ORDER_TRACE` => Delphi-style skip of technically-closed (`TEHZ`/`ZAKL`) sub-orders before AFRU calls.
 
 ## Delphi-parity semi-finished behavior
 

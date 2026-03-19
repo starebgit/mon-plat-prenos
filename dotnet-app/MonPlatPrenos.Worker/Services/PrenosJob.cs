@@ -463,7 +463,8 @@ public sealed class PrenosJob
                 WriteDiagnosticLine(
                     $"ORDER_TRACE order={order.OrderNumber} elapsedMs={orderSw.ElapsedMilliseconds} " +
                     $"semiCalls={trace.SemiExpansionCalls} fallbackCalls={trace.SemiFallbackCalls} " +
-                    $"subOrders={trace.SubOrdersRead} afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls} " +
+                    $"subOrders={trace.SubOrdersRead} subOrdersSkippedByStatus={trace.SubOrdersSkippedByStatus} " +
+                    $"afruCalls={trace.AfruCalls} componentsExpanded={trace.ComponentExpansionCalls} " +
                     $"subOrderCacheHits={trace.SubOrderCacheHits} afruCacheHits={trace.AfruCacheHits} semiDedupSkips={trace.SemiDedupSkips}");
             }
             Interlocked.Increment(ref progress.Processed);
@@ -595,6 +596,12 @@ public sealed class PrenosJob
 
         foreach (var subOrder in subOrders)
         {
+            if (IsTechnicallyClosedStatus(subOrder.Status))
+            {
+                trace.SubOrdersSkippedByStatus++;
+                continue;
+            }
+
             trace.AfruCalls++;
             var afruKey = BuildAfruCacheKey(subOrder.OrderNumber, subOrder.StartDate);
             if (!orderContext.AfruCache.TryGetValue(afruKey, out var afruDelta))
@@ -1221,7 +1228,7 @@ public sealed class PrenosJob
         {
             $"# diagnostics-log-start={DateTime.UtcNow:O}",
             $"# machine={Environment.MachineName}",
-            $"# process={Environment.ProcessId}",
+            $"# process={Process.GetCurrentProcess().Id}",
             $"# orderConcurrency={Math.Max(1, _options.OrderConcurrency)}",
             $"# maxSapCallsInFlight={Math.Max(1, _options.MaxSapCallsInFlight)}",
             $"# sapCallWarnMs={Math.Max(0, _options.SapCallWarnMs)}",
@@ -1411,6 +1418,7 @@ public sealed class PrenosJob
         public int SemiExpansionCalls;
         public int SemiFallbackCalls;
         public int SubOrdersRead;
+        public int SubOrdersSkippedByStatus;
         public int AfruCalls;
         public int ComponentExpansionCalls;
         public int SubOrderCacheHits;
