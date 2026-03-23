@@ -402,7 +402,15 @@ public sealed class PrenosJob
                 .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
             var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
             var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
-            result.PlateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
+            result.PlateDemands.Add(new PlateDemandRecord(
+                Track: track,
+                Stev: null,
+                OrderNumber: order.OrderNumber,
+                Material: formattedPlateMaterial,
+                Quantity: missingQty,
+                StartDate: order.StartDate,
+                Dan: null,
+                Izmena: null));
             stats.PlateRecordsWritten++;
 
             var components = await TimedSapCallAsync(
@@ -1022,7 +1030,7 @@ public sealed class PrenosJob
         var outputDigest = new OutputDigest
         {
             Plates = plateDemands
-                .Select(p => $"{p.Track}|{p.OrderNumber}|{p.Material}|{p.Quantity}|{p.StartDate:yyyy-MM-dd}")
+                .Select(p => $"{p.Track}|{(p.Stev.HasValue ? p.Stev.Value.ToString() : "")}|{p.OrderNumber}|{p.Material}|{p.Quantity}|{p.StartDate:yyyy-MM-dd}|{(p.Dan.HasValue ? p.Dan.Value.ToString("yyyy-MM-dd") : "")}|{(p.Izmena.HasValue ? p.Izmena.Value.ToString() : "")}")
                 .OrderBy(v => v, StringComparer.Ordinal)
                 .ToList(),
             Unified = unified
