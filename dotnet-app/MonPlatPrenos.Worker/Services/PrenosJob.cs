@@ -121,6 +121,7 @@ public sealed class PrenosJob
         }
 
         plateDemands = EnrichPlateDemandsFromLegacyPlosce(plateDemands);
+        plateDemands = AppendVsotaRows(plateDemands);
 
         ClearSingleLineStatus();
         var runtimeMs = runSw.ElapsedMilliseconds;
@@ -1187,6 +1188,44 @@ public sealed class PrenosJob
             Console.WriteLine($"Legacy plosce enrichment skipped due to error: {ex.Message}");
             return plateDemands;
         }
+    }
+
+    private static List<PlateDemandRecord> AppendVsotaRows(List<PlateDemandRecord> plateDemands)
+    {
+        if (plateDemands.Count == 0)
+        {
+            return plateDemands;
+        }
+
+        var result = new List<PlateDemandRecord>(plateDemands);
+        var vsotaStartDate = DateTime.Today.AddDays(-10);
+
+        var groups = plateDemands
+            .Where(r => r.Stev.HasValue && !string.Equals(r.OrderNumber, "Vsota", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.Stev!.Value)
+            .OrderBy(g => g.Key);
+
+        foreach (var group in groups)
+        {
+            var totalQuantity = group.Sum(r => r.Quantity);
+            if (totalQuantity <= 0)
+            {
+                continue;
+            }
+
+            var track = group.Select(r => r.Track).FirstOrDefault();
+            result.Add(new PlateDemandRecord(
+                Track: track,
+                Stev: group.Key,
+                OrderNumber: "Vsota",
+                Material: string.Empty,
+                Quantity: totalQuantity,
+                StartDate: vsotaStartDate,
+                Dan: null,
+                Izmena: null));
+        }
+
+        return result;
     }
 
     private static string BuildPlosceParityKey(string? orderNumber, string? material, int? quantity, DateTime? startDate)

@@ -84,6 +84,13 @@ When enabled, the worker reads `stev/nalog/koda/kolicina/danstart/dan/izmena` fr
 
 If `MontPlatConnectionString` is empty, enrichment is skipped.
 
+After enrichment, the worker appends Delphi-style `Vsota` plate rows at the end of `plates-*.json`:
+- grouped by `Stev`,
+- `Quantity` = sum of grouped rows,
+- `OrderNumber` = `Vsota`,
+- `Material` = empty string,
+- `StartDate` = `DateTime.Today.AddDays(-10)` (Delphi transfer-style marker date).
+
 You can change the fetched-code filename pattern with:
 
 ```json
