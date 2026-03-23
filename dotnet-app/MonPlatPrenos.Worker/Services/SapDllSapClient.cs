@@ -609,7 +609,6 @@ public sealed class SapDllSapClient : ISapClient
         return (yi1, yi2);
     }
 
-
     private IReadOnlyList<SapConfirmation> ParseConfirmationsReflection(object confirmationsTable)
     {
         var results = new List<SapConfirmation>();
