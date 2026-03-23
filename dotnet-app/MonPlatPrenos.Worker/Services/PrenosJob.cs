@@ -1112,11 +1112,11 @@ public sealed class PrenosJob
             return plateDemands;
         }
 
-        var connectionString = _options.LegacyPlosceConnectionString;
+        var connectionString = _options.MontPlatConnectionString;
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            Console.WriteLine("Legacy plosce enrichment skipped: Prenos:LegacyPlosceConnectionString is empty.");
+            Console.WriteLine("Plosce enrichment skipped: Prenos:MontPlatConnectionString is empty.");
             return plateDemands;
         }
 

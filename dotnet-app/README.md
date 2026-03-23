@@ -68,11 +68,11 @@ The worker also writes fetched order code rows to:
 
 These fields are emitted in the JSON output so table-vs-json comparisons can include the same column set used by legacy `plosce`.
 
-To populate these values from the legacy DB table (`plosce`) during a run, enable:
+To populate these values from the MontPlat DB table (`plosce`) during a run, configure:
 
 ```json
 "Prenos": {
-  "LegacyPlosceConnectionString": "FILE NAME=C:\\path\\to\\Montaz_pl.udl"
+  "MontPlatConnectionString": "Provider=SQLOLEDB.1;Password=Montaz_pl;Persist Security Info=True;User ID=Montaz_pl;Initial Catalog=MontPlat;Data Source=172.20.1.14"
 }
 ```
 
@@ -82,7 +82,7 @@ When enabled, the worker reads `stev/nalog/koda/kolicina/danstart/dan/izmena` fr
 - `Quantity` ↔ `kolicina`
 - `StartDate` (date part) ↔ `danstart`
 
-If `LegacyPlosceConnectionString` is empty, enrichment is skipped.
+If `MontPlatConnectionString` is empty, enrichment is skipped.
 
 You can change the fetched-code filename pattern with:
 
