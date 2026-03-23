@@ -30,7 +30,6 @@ public sealed class PrenosOptions
     public WatermarkOptions Watermark { get; set; } = new WatermarkOptions();
     public PrenosParityModeOptions ParityMode { get; set; } = new PrenosParityModeOptions();
     public string FetchedCodeLogFilePattern { get; set; } = "fetched-codes-{timestamp}.txt";
-    public bool EnableLegacyPlosceParityEnrichment { get; set; }
     public string? LegacyPlosceConnectionString { get; set; }
     public SapIntegrationOptions Sap { get; set; } = new SapIntegrationOptions();
 }

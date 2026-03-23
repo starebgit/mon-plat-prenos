@@ -72,8 +72,7 @@ To populate these values from the legacy DB table (`plosce`) during a run, enabl
 
 ```json
 "Prenos": {
-  "EnableLegacyPlosceParityEnrichment": true,
-  "LegacyPlosceConnectionString": ""
+  "LegacyPlosceConnectionString": "FILE NAME=C:\\path\\to\\Montaz_pl.udl"
 }
 ```
 
@@ -83,7 +82,7 @@ When enabled, the worker reads `stev/nalog/koda/kolicina/danstart/dan/izmena` fr
 - `Quantity` ↔ `kolicina`
 - `StartDate` (date part) ↔ `danstart`
 
-If `LegacyPlosceConnectionString` is empty, it falls back to `Prenos:Sap:SapLoginConnectionString`.
+If `LegacyPlosceConnectionString` is empty, enrichment is skipped.
 
 You can change the fetched-code filename pattern with:
 

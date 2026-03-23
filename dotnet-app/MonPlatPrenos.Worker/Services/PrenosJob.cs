@@ -1107,18 +1107,16 @@ public sealed class PrenosJob
 
     private List<PlateDemandRecord> EnrichPlateDemandsFromLegacyPlosce(List<PlateDemandRecord> plateDemands)
     {
-        if (!_options.EnableLegacyPlosceParityEnrichment || plateDemands.Count == 0)
+        if (plateDemands.Count == 0)
         {
             return plateDemands;
         }
 
-        var connectionString = string.IsNullOrWhiteSpace(_options.LegacyPlosceConnectionString)
-            ? _options.Sap.SapLoginConnectionString
-            : _options.LegacyPlosceConnectionString;
+        var connectionString = _options.LegacyPlosceConnectionString;
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            Console.WriteLine("Legacy plosce enrichment skipped: no connection string configured.");
+            Console.WriteLine("Legacy plosce enrichment skipped: Prenos:LegacyPlosceConnectionString is empty.");
             return plateDemands;
         }
 
