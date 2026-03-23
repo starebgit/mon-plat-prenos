@@ -61,6 +61,36 @@ The worker also writes fetched order code rows to:
 
 - `output/fetched-codes-YYYYMMDD-HHMMSS.txt`
 
+`plates-*.json` now also includes Delphi-aligned parity columns:
+- `Stev`
+- `Dan`
+- `Izmena`
+
+These fields are emitted in the JSON output so table-vs-json comparisons can include the same column set used by legacy `plosce`.
+
+To populate these values from the MontPlat DB table (`plosce`) during a run, configure:
+
+```json
+"Prenos": {
+  "MontPlatConnectionString": "Provider=SQLOLEDB.1;Password=Montaz_pl;Persist Security Info=True;User ID=Montaz_pl;Initial Catalog=MontPlat;Data Source=172.20.1.14"
+}
+```
+
+When enabled, the worker reads `stev/nalog/koda/kolicina/danstart/dan/izmena` from `plosce` and matches rows by:
+- `OrderNumber` ↔ `nalog`
+- `Material` ↔ `koda`
+- `Quantity` ↔ `kolicina`
+- `StartDate` (date part) ↔ `danstart`
+
+If `MontPlatConnectionString` is empty, enrichment is skipped.
+
+After enrichment, the worker appends Delphi-style `Vsota` plate rows at the end of `plates-*.json`:
+- grouped by `Stev`,
+- `Quantity` = sum of grouped rows,
+- `OrderNumber` = `Vsota`,
+- `Material` = empty string,
+- `StartDate` = `DateTime.Today.AddDays(-10)` (Delphi transfer-style marker date).
+
 You can change the fetched-code filename pattern with:
 
 ```json

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Data;
+using System.Data.OleDb;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
@@ -117,6 +119,9 @@ public sealed class PrenosJob
             unified.AddRange(result.Unified);
             semiFinished.AddRange(result.SemiFinished);
         }
+
+        plateDemands = EnrichPlateDemandsFromLegacyPlosce(plateDemands);
+        plateDemands = AppendVsotaRows(plateDemands);
 
         ClearSingleLineStatus();
         var runtimeMs = runSw.ElapsedMilliseconds;
@@ -402,7 +407,15 @@ public sealed class PrenosJob
                 .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
             var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
             var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
-            result.PlateDemands.Add(new PlateDemandRecord(track, order.OrderNumber, formattedPlateMaterial, missingQty, order.StartDate));
+            result.PlateDemands.Add(new PlateDemandRecord(
+                Track: track,
+                Stev: null,
+                OrderNumber: order.OrderNumber,
+                Material: formattedPlateMaterial,
+                Quantity: missingQty,
+                StartDate: order.StartDate,
+                Dan: null,
+                Izmena: null));
             stats.PlateRecordsWritten++;
 
             var components = await TimedSapCallAsync(
@@ -1022,7 +1035,7 @@ public sealed class PrenosJob
         var outputDigest = new OutputDigest
         {
             Plates = plateDemands
-                .Select(p => $"{p.Track}|{p.OrderNumber}|{p.Material}|{p.Quantity}|{p.StartDate:yyyy-MM-dd}")
+                .Select(p => $"{p.Track}|{(p.Stev.HasValue ? p.Stev.Value.ToString() : "")}|{p.OrderNumber}|{p.Material}|{p.Quantity}|{p.StartDate:yyyy-MM-dd}|{(p.Dan.HasValue ? p.Dan.Value.ToString("yyyy-MM-dd") : "")}|{(p.Izmena.HasValue ? p.Izmena.Value.ToString() : "")}")
                 .OrderBy(v => v, StringComparer.Ordinal)
                 .ToList(),
             Unified = unified
@@ -1090,6 +1103,179 @@ public sealed class PrenosJob
 
             yield return $"{name} first mismatch at index {i}: baseline='{baseline[i]}', current='{current[i]}'";
             yield break;
+        }
+    }
+
+    private List<PlateDemandRecord> EnrichPlateDemandsFromLegacyPlosce(List<PlateDemandRecord> plateDemands)
+    {
+        if (plateDemands.Count == 0)
+        {
+            return plateDemands;
+        }
+
+        var connectionString = _options.MontPlatConnectionString;
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            Console.WriteLine("Plosce enrichment skipped: Prenos:MontPlatConnectionString is empty.");
+            return plateDemands;
+        }
+
+        try
+        {
+            var dbRowsByKey = new Dictionary<string, Queue<(int? Stev, DateTime? Dan, int? Izmena)>>(StringComparer.Ordinal);
+
+            using (var connection = new OleDbConnection(connectionString))
+            {
+                connection.Open();
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "select stev, nalog, koda, kolicina, danstart, dan, izmena from plosce";
+                    using (var reader = command.ExecuteReader())
+                    {
+                        if (reader is null)
+                        {
+                            return plateDemands;
+                        }
+
+                        while (reader.Read())
+                        {
+                            var key = BuildPlosceParityKey(
+                                orderNumber: ReadString(reader["nalog"]),
+                                material: ReadString(reader["koda"]),
+                                quantity: ReadInt(reader["kolicina"]),
+                                startDate: ReadDate(reader["danstart"])?.Date);
+
+                            if (string.IsNullOrWhiteSpace(key))
+                            {
+                                continue;
+                            }
+
+                            if (!dbRowsByKey.TryGetValue(key, out var queue))
+                            {
+                                queue = new Queue<(int? Stev, DateTime? Dan, int? Izmena)>();
+                                dbRowsByKey[key] = queue;
+                            }
+
+                            queue.Enqueue((ReadInt(reader["stev"]), ReadDate(reader["dan"])?.Date, ReadInt(reader["izmena"])));
+                        }
+                    }
+                }
+            }
+
+            var matches = 0;
+            var enriched = new List<PlateDemandRecord>(plateDemands.Count);
+            foreach (var row in plateDemands)
+            {
+                var key = BuildPlosceParityKey(row.OrderNumber, row.Material, row.Quantity, row.StartDate.Date);
+                if (dbRowsByKey.TryGetValue(key, out var queue) && queue.Count > 0)
+                {
+                    var mapped = queue.Dequeue();
+                    enriched.Add(row with { Stev = mapped.Stev, Dan = mapped.Dan, Izmena = mapped.Izmena });
+                    matches++;
+                }
+                else
+                {
+                    enriched.Add(row);
+                }
+            }
+
+            Console.WriteLine($"Legacy plosce enrichment complete: matched {matches}/{plateDemands.Count} plate rows.");
+            return enriched;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Legacy plosce enrichment skipped due to error: {ex.Message}");
+            return plateDemands;
+        }
+    }
+
+    private static List<PlateDemandRecord> AppendVsotaRows(List<PlateDemandRecord> plateDemands)
+    {
+        if (plateDemands.Count == 0)
+        {
+            return plateDemands;
+        }
+
+        var result = new List<PlateDemandRecord>(plateDemands);
+        var vsotaStartDate = DateTime.Today.AddDays(-10);
+
+        var groups = plateDemands
+            .Where(r => r.Stev.HasValue && !string.Equals(r.OrderNumber, "Vsota", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.Stev!.Value)
+            .OrderBy(g => g.Key);
+
+        foreach (var group in groups)
+        {
+            var totalQuantity = group.Sum(r => r.Quantity);
+            if (totalQuantity <= 0)
+            {
+                continue;
+            }
+
+            var track = group.Select(r => r.Track).FirstOrDefault();
+            result.Add(new PlateDemandRecord(
+                Track: track,
+                Stev: group.Key,
+                OrderNumber: "Vsota",
+                Material: string.Empty,
+                Quantity: totalQuantity,
+                StartDate: vsotaStartDate,
+                Dan: null,
+                Izmena: null));
+        }
+
+        return result;
+    }
+
+    private static string BuildPlosceParityKey(string? orderNumber, string? material, int? quantity, DateTime? startDate)
+    {
+        if (string.IsNullOrWhiteSpace(orderNumber) || string.IsNullOrWhiteSpace(material) || !quantity.HasValue || !startDate.HasValue)
+        {
+            return string.Empty;
+        }
+
+        return string.Concat(
+            orderNumber.Trim(), "|",
+            material.Trim(), "|",
+            quantity.Value.ToString(), "|",
+            startDate.Value.ToString("yyyy-MM-dd"));
+    }
+
+    private static string ReadString(object value)
+        => value == DBNull.Value ? string.Empty : Convert.ToString(value)?.Trim() ?? string.Empty;
+
+    private static int? ReadInt(object value)
+    {
+        if (value == DBNull.Value)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static DateTime? ReadDate(object value)
+    {
+        if (value == DBNull.Value)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.ToDateTime(value);
+        }
+        catch
+        {
+            return null;
         }
     }
 
