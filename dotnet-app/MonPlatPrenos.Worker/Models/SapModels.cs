@@ -31,10 +31,13 @@ public sealed record SapComponent(
 
 public sealed record PlateDemandRecord(
     int Track,
+    int? Stev,
     string OrderNumber,
     string Material,
     int Quantity,
-    DateTime StartDate);
+    DateTime StartDate,
+    DateTime? Dan,
+    int? Izmena);
 
 public sealed record UnifiedItem(
     string OrderNumber,
