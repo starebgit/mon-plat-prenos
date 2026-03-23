@@ -125,8 +125,8 @@ public sealed class ConfirmationFieldMap
 public sealed class AfruFieldMap
 {
     public string WorkCenterId { get; set; } = "ARBID";
-    public string Yield { get; set; } = "YIELD";
-    public string Reversed { get; set; } = "REVERSED";
+    public string Yield { get; set; } = "LMNGA";
+    public string Reversed { get; set; } = "STOKZ";
 }
 
 public sealed class TermRule
