@@ -68,6 +68,23 @@ The worker also writes fetched order code rows to:
 
 These fields are emitted in the JSON output so table-vs-json comparisons can include the same column set used by legacy `plosce`.
 
+To populate these values from the legacy DB table (`plosce`) during a run, enable:
+
+```json
+"Prenos": {
+  "EnableLegacyPlosceParityEnrichment": true,
+  "LegacyPlosceConnectionString": ""
+}
+```
+
+When enabled, the worker reads `stev/nalog/koda/kolicina/danstart/dan/izmena` from `plosce` and matches rows by:
+- `OrderNumber` ↔ `nalog`
+- `Material` ↔ `koda`
+- `Quantity` ↔ `kolicina`
+- `StartDate` (date part) ↔ `danstart`
+
+If `LegacyPlosceConnectionString` is empty, it falls back to `Prenos:Sap:SapLoginConnectionString`.
+
 You can change the fetched-code filename pattern with:
 
 ```json
