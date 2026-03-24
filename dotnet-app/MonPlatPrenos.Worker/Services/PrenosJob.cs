@@ -347,7 +347,7 @@ public sealed class PrenosJob
                 return result;
             }
 
-            var totalYield = 0;
+            var perOperationMissing = new List<(SapOperation Operation, int MissingQty)>();
             var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
             if (maxConcurrency == 1 || validOperations.Count <= 1)
             {
@@ -361,7 +361,12 @@ public sealed class PrenosJob
                             cancellationToken,
                             () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
                     stats.ConfirmationRowsRead += confirmations.Count;
-                    totalYield += confirmations.Sum(c => c.Yield);
+                    var operationYield = confirmations.Sum(c => c.Yield);
+                    var missingQty = order.PlannedQuantity - operationYield;
+                    if (missingQty > 0)
+                    {
+                        perOperationMissing.Add((op, missingQty));
+                    }
                 }
             }
             else
@@ -379,7 +384,7 @@ public sealed class PrenosJob
                             sapCallSemaphore,
                             cancellationToken,
                             () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
-                        return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
+                        return (Operation: op, Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
                     }
                     finally
                     {
@@ -391,32 +396,37 @@ public sealed class PrenosJob
                 foreach (var item in confirmationResults)
                 {
                     stats.ConfirmationRowsRead += item.Count;
-                    totalYield += item.Yield;
+                    var missingQty = order.PlannedQuantity - item.Yield;
+                    if (missingQty > 0)
+                    {
+                        perOperationMissing.Add((item.Operation, missingQty));
+                    }
                 }
             }
 
-            var missingQty = order.PlannedQuantity - totalYield;
-            if (missingQty <= 0)
+            if (perOperationMissing.Count == 0)
             {
                 stats.SkippedByMissingQty++;
                 return result;
             }
 
-            var operationTrackCode = validOperations
-                .Select(o => o.WorkCenterCode)
-                .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
-            var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
             var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
-            result.PlateDemands.Add(new PlateDemandRecord(
-                Track: track,
-                Stev: null,
-                OrderNumber: order.OrderNumber,
-                Material: formattedPlateMaterial,
-                Quantity: missingQty,
-                StartDate: order.StartDate,
-                Dan: null,
-                Izmena: null));
-            stats.PlateRecordsWritten++;
+            foreach (var opResult in perOperationMissing)
+            {
+                var operationTrackCode = string.IsNullOrWhiteSpace(opResult.Operation.WorkCenterCode)
+                    ? order.WorkCenterTrackCode
+                    : opResult.Operation.WorkCenterCode;
+                result.PlateDemands.Add(new PlateDemandRecord(
+                    Track: ParseTrack(operationTrackCode),
+                    Stev: null,
+                    OrderNumber: order.OrderNumber,
+                    Material: formattedPlateMaterial,
+                    Quantity: opResult.MissingQty,
+                    StartDate: order.StartDate,
+                    Dan: null,
+                    Izmena: null));
+                stats.PlateRecordsWritten++;
+            }
 
             var components = await TimedSapCallAsync(
                 timing,
@@ -436,17 +446,20 @@ public sealed class PrenosJob
                         continue;
                     }
 
-                    result.Unified.Add(new UnifiedItem(
-                        order.OrderNumber,
-                        formattedPlateMaterial,
-                        FormatMaterialLikeDelphi(component.Material),
-                        component.Description,
-                        rule.Name,
-                        missingQty,
-                        DateTime.UtcNow));
+                    foreach (var opResult in perOperationMissing)
+                    {
+                        result.Unified.Add(new UnifiedItem(
+                            order.OrderNumber,
+                            formattedPlateMaterial,
+                            FormatMaterialLikeDelphi(component.Material),
+                            component.Description,
+                            rule.Name,
+                            opResult.MissingQty,
+                            DateTime.UtcNow));
 
-                    stats.UnifiedRowsWritten++;
-                    stats.AddCategoryHit(rule.Name);
+                        stats.UnifiedRowsWritten++;
+                        stats.AddCategoryHit(rule.Name);
+                    }
 
                     if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
