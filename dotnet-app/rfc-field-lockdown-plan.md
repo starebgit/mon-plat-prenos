@@ -106,7 +106,7 @@ ZETA_RFC_READ_AFRU
 - Material = `MATERIAL`
 - SystemStatus = `SYSTEM_STATUS`
 - PlannedQuantity = `TARGET_QUANTITY`
-- StartDate = `START_DATE`
+- StartDate = `PRODUCTION_START_DATE`
 - SchedulerCode = `PROD_SCHED`
 - Plant = `PRODUCTION_PLANT`
 - WorkCenter = `WORK_CENTER`
