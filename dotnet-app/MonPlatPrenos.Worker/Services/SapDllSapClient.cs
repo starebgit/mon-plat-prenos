@@ -622,11 +622,9 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var yield = ParseInt(GetString(row, _fieldMap.Confirmation.Yield));
-            if (yield == 0)
-            {
-                yield = LoadConfirmationDetailYieldReflection(confNo, confCounter);
-            }
+            // Delphi parity: confirmation yield is read from BAPI_PRODORDCONF_GETDETAIL
+            // for every confirmation row (not only when list-level yield is zero).
+            var yield = LoadConfirmationDetailYieldReflection(confNo, confCounter);
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
@@ -666,11 +664,9 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var yield = ParseInt(SafeGetFastField(getField, row, _fieldMap.Confirmation.Yield));
-            if (yield == 0)
-            {
-                yield = LoadConfirmationDetailYieldFast(confNo, confCounter);
-            }
+            // Delphi parity: confirmation yield is read from BAPI_PRODORDCONF_GETDETAIL
+            // for every confirmation row (not only when list-level yield is zero).
+            var yield = LoadConfirmationDetailYieldFast(confNo, confCounter);
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
