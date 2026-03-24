@@ -14,6 +14,14 @@ This is a .NET 8 worker app that mirrors the current Delphi behavior and is read
 - JSON output files in `output/`:
   - `plates-*.json`
   - `unified-*.json`
+  - category split files generated from `unified-*.json`:
+    - `samoti-*.json`
+    - `protekt-*.json`
+    - `sponke-*.json`
+    - `obroci-*.json`
+    - `ulitki-*.json`
+    - `spirale-*.json`
+    - plus additional `<category>-*.json` files for custom/extra terms
   - `semi-finished-*.json` (debug trace for AFRU/semi-finished flow)
 
 ## Run
@@ -519,6 +527,12 @@ A Windows Forms debug app is included: `MonPlatPrenos.DebugRunner`.
 - It executes the same `PrenosJob` and writes:
   - `plates-*.json`
   - `unified-*.json`
+  - `samoti-*.json`
+  - `protekt-*.json`
+  - `sponke-*.json`
+  - `obroci-*.json`
+  - `ulitki-*.json`
+  - `spirale-*.json`
   - `semi-finished-*.json`
   - `prenos-debug-*.txt`
 
