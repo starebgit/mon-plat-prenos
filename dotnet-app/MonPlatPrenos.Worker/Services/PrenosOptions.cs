@@ -94,7 +94,7 @@ public sealed class OrderHeaderFieldMap
     public string Material { get; set; } = "MATERIAL";
     public string SystemStatus { get; set; } = "SYSTEM_STATUS";
     public string PlannedQuantity { get; set; } = "TARGET_QUANTITY";
-    public string StartDate { get; set; } = "START_DATE";
+    public string StartDate { get; set; } = "PRODUCTION_START_DATE";
     public string SchedulerCode { get; set; } = "PROD_SCHED";
     public string Plant { get; set; } = "PRODUCTION_PLANT";
     public string WorkCenter { get; set; } = "WORK_CENTER";
