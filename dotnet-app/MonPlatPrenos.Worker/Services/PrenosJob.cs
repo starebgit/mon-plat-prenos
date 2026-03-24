@@ -901,9 +901,9 @@ public sealed class PrenosJob
             .ToArray();
 
         var token = new string(chars).Trim('-');
-        while (token.Contains("--", StringComparison.Ordinal))
+        while (token.Contains("--"))
         {
-            token = token.Replace("--", "-", StringComparison.Ordinal);
+            token = token.Replace("--", "-");
         }
 
         return string.IsNullOrWhiteSpace(token) ? "uncategorized" : token;
