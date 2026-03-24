@@ -1200,23 +1200,23 @@ public sealed class PrenosJob
         var result = new List<PlateDemandRecord>(plateDemands);
         var vsotaStartDate = DateTime.Today.AddDays(-10);
 
-        var groups = plateDemands
-            .Where(r => r.Stev.HasValue && !string.Equals(r.OrderNumber, "Vsota", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(r => r.Stev!.Value)
-            .OrderBy(g => g.Key);
+        var nonVsotaRows = plateDemands
+            .Where(r => !string.Equals(r.OrderNumber, "Vsota", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-        foreach (var group in groups)
+        // Legacy parity: emit Vsota rows for all production lines (1..5), including zero totals.
+        for (var stev = 1; stev <= 5; stev++)
         {
-            var totalQuantity = group.Sum(r => r.Quantity);
-            if (totalQuantity <= 0)
-            {
-                continue;
-            }
+            var rowsForStev = nonVsotaRows
+                .Where(r => r.Stev == stev)
+                .ToList();
 
-            var track = group.Select(r => r.Track).FirstOrDefault();
+            var totalQuantity = rowsForStev.Sum(r => r.Quantity);
+            var track = rowsForStev.Select(r => r.Track).FirstOrDefault();
+
             result.Add(new PlateDemandRecord(
                 Track: track,
-                Stev: group.Key,
+                Stev: stev,
                 OrderNumber: "Vsota",
                 Material: string.Empty,
                 Quantity: totalQuantity,
