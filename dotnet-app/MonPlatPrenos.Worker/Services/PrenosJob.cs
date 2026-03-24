@@ -917,33 +917,34 @@ public sealed class PrenosJob
     private static int TipObroca(string description)
     {
         var normalized = (description ?? string.Empty).Trim().ToUpperInvariant();
+        bool Has(string token) => normalized.IndexOf(token, StringComparison.Ordinal) >= 0;
 
         // Delphi parity (transfer.pas TipObroca):
         // 220=>1, 180=>2, 145=>3, 80/110/115=>4, and add +4 when "-4" is present.
         var zap = 4;
-        if (normalized.Contains("OBROČ 220", StringComparison.Ordinal) || normalized.Contains("OBROC 220", StringComparison.Ordinal))
+        if (Has("OBROČ 220") || Has("OBROC 220"))
         {
             zap = 1;
         }
-        else if (normalized.Contains("OBROČ 180", StringComparison.Ordinal) || normalized.Contains("OBROC 180", StringComparison.Ordinal))
+        else if (Has("OBROČ 180") || Has("OBROC 180"))
         {
             zap = 2;
         }
-        else if (normalized.Contains("OBROČ 145", StringComparison.Ordinal) || normalized.Contains("OBROC 145", StringComparison.Ordinal))
+        else if (Has("OBROČ 145") || Has("OBROC 145"))
         {
             zap = 3;
         }
-        else if (normalized.Contains("OBROČ 80", StringComparison.Ordinal)
-                 || normalized.Contains("OBROC 80", StringComparison.Ordinal)
-                 || normalized.Contains("OBROČ 110", StringComparison.Ordinal)
-                 || normalized.Contains("OBROC 110", StringComparison.Ordinal)
-                 || normalized.Contains("OBROČ 115", StringComparison.Ordinal)
-                 || normalized.Contains("OBROC 115", StringComparison.Ordinal))
+        else if (Has("OBROČ 80")
+                 || Has("OBROC 80")
+                 || Has("OBROČ 110")
+                 || Has("OBROC 110")
+                 || Has("OBROČ 115")
+                 || Has("OBROC 115"))
         {
             zap = 4;
         }
 
-        if (normalized.Contains("-4", StringComparison.Ordinal))
+        if (Has("-4"))
         {
             zap += 4;
         }
