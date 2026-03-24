@@ -827,8 +827,86 @@ public sealed class PrenosJob
         await WriteAllTextCompatAsync(platePath, JsonSerializer.Serialize(plateDemands, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         await WriteAllTextCompatAsync(unifiedPath, JsonSerializer.Serialize(unified, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
 
+        var unifiedBuckets = unified
+            .GroupBy(item => GetUnifiedBucketName(item.Category), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var bucket in unifiedBuckets)
+        {
+            var bucketPath = Path.Combine(outputDirectory, $"{bucket.Key}-{stamp}.json");
+            var rows = bucket
+                .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
+                .ThenBy(item => item.Category, StringComparer.Ordinal)
+                .ToList();
+            await WriteAllTextCompatAsync(bucketPath, JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        }
+
         var semiPath = Path.Combine(outputDirectory, $"semi-finished-{stamp}.json");
         await WriteAllTextCompatAsync(semiPath, JsonSerializer.Serialize(semiFinished, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+    }
+
+    private static string GetUnifiedBucketName(string category)
+    {
+        var normalized = (category ?? string.Empty).Trim();
+        if (normalized.EndsWith("_AFRU", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized.Substring(0, normalized.Length - "_AFRU".Length);
+        }
+
+        if (normalized.Equals("Samot", StringComparison.OrdinalIgnoreCase))
+        {
+            return "samoti";
+        }
+
+        if (normalized.Equals("Protektor", StringComparison.OrdinalIgnoreCase))
+        {
+            return "protekt";
+        }
+
+        if (normalized.Equals("Sponka", StringComparison.OrdinalIgnoreCase))
+        {
+            return "sponke";
+        }
+
+        if (normalized.Equals("Obroc", StringComparison.OrdinalIgnoreCase))
+        {
+            return "obroci";
+        }
+
+        if (normalized.Equals("Ulitki", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ulitki";
+        }
+
+        if (normalized.Equals("Spirala", StringComparison.OrdinalIgnoreCase))
+        {
+            return "spirale";
+        }
+
+        return SanitizeFileToken(normalized);
+    }
+
+    private static string SanitizeFileToken(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "uncategorized";
+        }
+
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray();
+
+        var token = new string(chars).Trim('-');
+        while (token.Contains("--", StringComparison.Ordinal))
+        {
+            token = token.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return string.IsNullOrWhiteSpace(token) ? "uncategorized" : token;
     }
 
     private async Task WriteFetchedCodesLogAsync(IReadOnlyList<SapOrderHeader> orders, CancellationToken cancellationToken)
