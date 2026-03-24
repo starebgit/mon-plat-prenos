@@ -454,6 +454,7 @@ public sealed class PrenosJob
                             FormatMaterialLikeDelphi(component.Material),
                             component.Description,
                             rule.Name,
+                            ResolveZap(rule.Name, component.Description),
                             opResult.MissingQty,
                             DateTime.UtcNow));
 
@@ -663,6 +664,7 @@ public sealed class PrenosJob
                 FormatMaterialLikeDelphi(semiComponent.Material),
                 $"AFRU delta for {subOrder.OrderNumber}",
                 $"{category}_AFRU",
+                null,
                 afruDelta,
                 DateTime.UtcNow));
             stats.UnifiedRowsWritten++;
@@ -716,6 +718,7 @@ public sealed class PrenosJob
                     FormatMaterialLikeDelphi(cmp.Material),
                     cmp.Description,
                     "Ulitki",
+                    null,
                     0,
                     DateTime.UtcNow));
                 stats.UnifiedRowsWritten++;
@@ -741,6 +744,7 @@ public sealed class PrenosJob
                     FormatMaterialLikeDelphi(cmp.Material),
                     cmp.Description,
                     "Spirala",
+                    null,
                     0,
                     DateTime.UtcNow));
                 stats.UnifiedRowsWritten++;
@@ -898,6 +902,53 @@ public sealed class PrenosJob
         }
 
         return SanitizeFileToken(normalized);
+    }
+
+    private static int? ResolveZap(string category, string componentDescription)
+    {
+        if (!string.Equals(category, "Obroc", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return TipObroca(componentDescription);
+    }
+
+    private static int TipObroca(string description)
+    {
+        var normalized = (description ?? string.Empty).Trim().ToUpperInvariant();
+
+        // Delphi parity (transfer.pas TipObroca):
+        // 220=>1, 180=>2, 145=>3, 80/110/115=>4, and add +4 when "-4" is present.
+        var zap = 4;
+        if (normalized.Contains("OBROČ 220", StringComparison.Ordinal) || normalized.Contains("OBROC 220", StringComparison.Ordinal))
+        {
+            zap = 1;
+        }
+        else if (normalized.Contains("OBROČ 180", StringComparison.Ordinal) || normalized.Contains("OBROC 180", StringComparison.Ordinal))
+        {
+            zap = 2;
+        }
+        else if (normalized.Contains("OBROČ 145", StringComparison.Ordinal) || normalized.Contains("OBROC 145", StringComparison.Ordinal))
+        {
+            zap = 3;
+        }
+        else if (normalized.Contains("OBROČ 80", StringComparison.Ordinal)
+                 || normalized.Contains("OBROC 80", StringComparison.Ordinal)
+                 || normalized.Contains("OBROČ 110", StringComparison.Ordinal)
+                 || normalized.Contains("OBROC 110", StringComparison.Ordinal)
+                 || normalized.Contains("OBROČ 115", StringComparison.Ordinal)
+                 || normalized.Contains("OBROC 115", StringComparison.Ordinal))
+        {
+            zap = 4;
+        }
+
+        if (normalized.Contains("-4", StringComparison.Ordinal))
+        {
+            zap += 4;
+        }
+
+        return zap;
     }
 
     private static string SanitizeFileToken(string value)
