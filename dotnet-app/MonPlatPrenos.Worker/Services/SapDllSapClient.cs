@@ -789,6 +789,24 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         var type = metadata.GetType();
+        var getEnumerator = type.GetMethod("GetEnumerator", Type.EmptyTypes);
+        if (getEnumerator is not null)
+        {
+            var iterator = getEnumerator.Invoke(metadata, null) as System.Collections.IEnumerator;
+            if (iterator is not null)
+            {
+                while (iterator.MoveNext())
+                {
+                    if (iterator.Current is not null)
+                    {
+                        yield return iterator.Current;
+                    }
+                }
+
+                yield break;
+            }
+        }
+
         var countProperty = type.GetProperty("Count")
                            ?? type.GetProperty("FieldCount")
                            ?? type.GetProperty("ParameterCount");
@@ -808,6 +826,21 @@ public sealed class SapDllSapClient : ISapClient
                          ?? type.GetMethod("Item", new[] { typeof(int) });
         if (getByIndex is null)
         {
+            var getElementMetadata = type.GetMethod("GetElementMetadata", new[] { typeof(int) });
+            if (getElementMetadata is null)
+            {
+                yield break;
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                var item = getElementMetadata.Invoke(metadata, new object[] { i });
+                if (item is not null)
+                {
+                    yield return item;
+                }
+            }
+
             yield break;
         }
 
