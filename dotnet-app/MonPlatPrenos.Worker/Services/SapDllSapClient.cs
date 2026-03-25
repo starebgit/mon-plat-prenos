@@ -517,8 +517,7 @@ public sealed class SapDllSapClient : ISapClient
 
         try
         {
-            var function = CreateFunction(functionName);
-            var paramNames = GetFunctionParameterNames(function);
+            var paramNames = GetFunctionParameterNames(functionName);
             sb.AppendLine($"Parameters ({paramNames.Count}): {(paramNames.Count == 0 ? "<none>" : string.Join(", ", paramNames))}");
 
             foreach (var container in containersToInspect.Distinct(StringComparer.Ordinal))
@@ -547,8 +546,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         try
         {
-            var function = CreateFunction(functionName);
-            var actual = new HashSet<string>(GetFunctionParameterNames(function), StringComparer.OrdinalIgnoreCase);
+            var actual = new HashSet<string>(GetFunctionParameterNames(functionName), StringComparer.OrdinalIgnoreCase);
             foreach (var expected in expectedNames.Where(x => !string.IsNullOrWhiteSpace(x)))
             {
                 if (!actual.Contains(expected))
@@ -593,10 +591,32 @@ public sealed class SapDllSapClient : ISapClient
         return ExtractNamesFromMetadata(metadata);
     }
 
+    private IReadOnlyList<string> GetFunctionParameterNames(string functionName)
+    {
+        var metadata = GetFunctionMetadata(functionName);
+        if (metadata is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        return ExtractNamesFromMetadata(metadata);
+    }
+
     private IReadOnlyList<string> GetContainerFieldNames(string functionName, string containerName)
     {
         try
         {
+            var functionMetadata = GetFunctionMetadata(functionName);
+            var parameterMetadata = FindNamedMetadataItem(functionMetadata, containerName);
+            if (parameterMetadata is not null)
+            {
+                var fromParamMetadata = ExtractFieldNamesFromParameterMetadata(parameterMetadata);
+                if (fromParamMetadata.Count > 0)
+                {
+                    return fromParamMetadata;
+                }
+            }
+
             var function = CreateFunction(functionName);
             object? container = TryGetTable(function, containerName)
                                 ?? TryGetStructure(function, containerName)
@@ -613,6 +633,79 @@ public sealed class SapDllSapClient : ISapClient
         {
             return Array.Empty<string>();
         }
+    }
+
+    private object? GetFunctionMetadata(string functionName)
+    {
+        try
+        {
+            var repository = GetRepository();
+            var getFunctionMetadata = repository.GetType().GetMethod("GetFunctionMetadata", new[] { typeof(string) });
+            if (getFunctionMetadata is not null)
+            {
+                return getFunctionMetadata.Invoke(repository, new object[] { functionName });
+            }
+        }
+        catch
+        {
+            // fallback below
+        }
+
+        try
+        {
+            var function = CreateFunction(functionName);
+            return function.GetType().GetProperty("Metadata")?.GetValue(function);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object? FindNamedMetadataItem(object? metadata, string name)
+    {
+        if (metadata is null || string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        foreach (var item in EnumerateMetadataItems(metadata))
+        {
+            var itemName = Convert.ToString(item.GetType().GetProperty("Name")?.GetValue(item), CultureInfo.InvariantCulture);
+            if (string.Equals(itemName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> ExtractFieldNamesFromParameterMetadata(object parameterMetadata)
+    {
+        var valueMetadata = parameterMetadata.GetType().GetProperty("ValueMetadata")?.GetValue(parameterMetadata);
+        if (valueMetadata is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var direct = ExtractNamesFromMetadata(valueMetadata);
+        if (direct.Count > 0)
+        {
+            return direct;
+        }
+
+        var lineType = valueMetadata.GetType().GetProperty("LineType")?.GetValue(valueMetadata);
+        if (lineType is not null)
+        {
+            var lineNames = ExtractNamesFromMetadata(lineType);
+            if (lineNames.Count > 0)
+            {
+                return lineNames;
+            }
+        }
+
+        return Array.Empty<string>();
     }
 
     private static object? TryGetTable(object function, string tableName)
@@ -668,28 +761,9 @@ public sealed class SapDllSapClient : ISapClient
 
     private static IReadOnlyList<string> ExtractNamesFromMetadata(object metadata)
     {
-        var count = GetMetadataCount(metadata);
-        if (count <= 0)
+        var names = new List<string>();
+        foreach (var item in EnumerateMetadataItems(metadata))
         {
-            return Array.Empty<string>();
-        }
-
-        var getByIndex = metadata.GetType().GetMethod("get_Item", new[] { typeof(int) })
-                         ?? metadata.GetType().GetMethod("Item", new[] { typeof(int) });
-        if (getByIndex is null)
-        {
-            return Array.Empty<string>();
-        }
-
-        var names = new List<string>(count);
-        for (var i = 0; i < count; i++)
-        {
-            var item = getByIndex.Invoke(metadata, new object[] { i });
-            if (item is null)
-            {
-                continue;
-            }
-
             var name = Convert.ToString(item.GetType().GetProperty("Name")?.GetValue(item), CultureInfo.InvariantCulture);
             if (!string.IsNullOrWhiteSpace(name))
             {
@@ -700,24 +774,51 @@ public sealed class SapDllSapClient : ISapClient
         return names;
     }
 
-    private static int GetMetadataCount(object metadata)
+    private static IEnumerable<object> EnumerateMetadataItems(object metadata)
     {
+        if (metadata is System.Collections.IEnumerable enumerable)
+        {
+            foreach (var item in enumerable)
+            {
+                if (item is not null)
+                {
+                    yield return item;
+                }
+            }
+            yield break;
+        }
+
         var type = metadata.GetType();
         var countProperty = type.GetProperty("Count")
                            ?? type.GetProperty("FieldCount")
                            ?? type.GetProperty("ParameterCount");
-        if (countProperty is null)
+        var countRaw = countProperty?.GetValue(metadata);
+        if (countRaw is null)
         {
-            return 0;
+            yield break;
         }
 
-        var raw = countProperty.GetValue(metadata);
-        if (raw is null)
+        var count = Convert.ToInt32(countRaw, CultureInfo.InvariantCulture);
+        if (count <= 0)
         {
-            return 0;
+            yield break;
         }
 
-        return Convert.ToInt32(raw, CultureInfo.InvariantCulture);
+        var getByIndex = type.GetMethod("get_Item", new[] { typeof(int) })
+                         ?? type.GetMethod("Item", new[] { typeof(int) });
+        if (getByIndex is null)
+        {
+            yield break;
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            var item = getByIndex.Invoke(metadata, new object[] { i });
+            if (item is not null)
+            {
+                yield return item;
+            }
+        }
     }
 
     private IReadOnlyList<SapOrderHeader> ParsePlateOrderHeadersReflection(object orderHeader, string defaultPlant, string schedulerCode)
