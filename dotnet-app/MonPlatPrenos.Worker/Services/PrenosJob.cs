@@ -848,53 +848,27 @@ public sealed class PrenosJob
             .GroupBy(item => GetUnifiedBucketName(item.Category), StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
 
+        var obrociParityRows = await BuildObrociParityRowsAsync(plateDemands, unified, cancellationToken);
+
         foreach (var bucket in unifiedBuckets)
         {
             var bucketPath = Path.Combine(outputDirectory, $"{bucket.Key}-{stamp}.json");
-            List<UnifiedItem> rows;
             if (string.Equals(bucket.Key, "obroci", StringComparison.OrdinalIgnoreCase))
             {
-                // Delphi parity: obroci table rows are accumulated in Zapissamot by (mat, mat_pl),
-                // then written once per grouped combination. Emit grouped JSON rows the same way.
-                rows = bucket
-                    .GroupBy(
-                        item => new
-                        {
-                            item.Zap,
-                            item.PlateMaterial,
-                            item.ComponentMaterial,
-                            item.ComponentDescription,
-                            item.Category
-                        })
-                    .Select(group =>
-                    {
-                        var first = group
-                            .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
-                            .First();
-                        return new UnifiedItem(
-                            OrderNumber: first.OrderNumber,
-                            PlateMaterial: group.Key.PlateMaterial,
-                            ComponentMaterial: group.Key.ComponentMaterial,
-                            ComponentDescription: group.Key.ComponentDescription,
-                            Category: group.Key.Category,
-                            Zap: group.Key.Zap,
-                            RequiredQty: group.Sum(item => item.RequiredQty),
-                            CapturedAtUtc: first.CapturedAtUtc);
-                    })
-                    .OrderBy(item => item.Zap)
-                    .ThenBy(item => item.PlateMaterial, StringComparer.Ordinal)
-                    .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
-                    .ToList();
+                await WriteAllTextCompatAsync(
+                    bucketPath,
+                    JsonSerializer.Serialize(obrociParityRows, new JsonSerializerOptions { WriteIndented = true }),
+                    cancellationToken);
             }
             else
             {
-                rows = bucket
+                var rows = bucket
                     .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
                     .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
                     .ThenBy(item => item.Category, StringComparer.Ordinal)
                     .ToList();
+                await WriteAllTextCompatAsync(bucketPath, JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
             }
-            await WriteAllTextCompatAsync(bucketPath, JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         }
 
         var semiPath = Path.Combine(outputDirectory, $"semi-finished-{stamp}.json");
@@ -988,6 +962,143 @@ public sealed class PrenosJob
         }
 
         return zap;
+    }
+
+    private async Task<List<ObrociParityRecord>> BuildObrociParityRowsAsync(
+        IReadOnlyList<PlateDemandRecord> plateDemands,
+        IReadOnlyList<UnifiedItem> unified,
+        CancellationToken cancellationToken)
+    {
+        var obrociItems = unified
+            .Where(item => string.Equals(item.Category, "Obroc", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var plateQueues = plateDemands
+            .Where(p => !string.Equals(p.OrderNumber, "Vsota", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(p => BuildObrociPlateMatchKey(p.OrderNumber, p.Material, p.Quantity))
+            .ToDictionary(
+                g => g.Key,
+                g => new Queue<PlateDemandRecord>(g.OrderBy(p => p.StartDate)),
+                StringComparer.Ordinal);
+
+        var staged = new List<ObrociStageRow>(obrociItems.Count);
+        foreach (var item in obrociItems)
+        {
+            var key = BuildObrociPlateMatchKey(item.OrderNumber, item.PlateMaterial, item.RequiredQty);
+            PlateDemandRecord? plate = null;
+            if (plateQueues.TryGetValue(key, out var queue) && queue.Count > 0)
+            {
+                plate = queue.Dequeue();
+            }
+
+            staged.Add(new ObrociStageRow(
+                Zap: item.Zap ?? TipObroca(item.ComponentDescription),
+                Linija: plate?.Stev ?? 0,
+                Koda: item.ComponentMaterial,
+                KodaPl: item.PlateMaterial,
+                Naziv: item.ComponentDescription,
+                Kolic: item.RequiredQty,
+                Dan: plate?.Dan,
+                Izmena: plate?.Izmena));
+        }
+
+        var grouped = staged
+            .GroupBy(row => new { row.Zap, row.Koda, row.KodaPl, row.Naziv, row.Linija })
+            .Select(group =>
+            {
+                var first = group.First();
+                return new ObrociStageRow(
+                    Zap: group.Key.Zap,
+                    Linija: group.Key.Linija,
+                    Koda: group.Key.Koda,
+                    KodaPl: group.Key.KodaPl,
+                    Naziv: group.Key.Naziv,
+                    Kolic: group.Sum(x => x.Kolic),
+                    Dan: first.Dan,
+                    Izmena: first.Izmena);
+            })
+            .OrderBy(row => row.Zap)
+            .ThenBy(row => row.Koda, StringComparer.Ordinal)
+            .ThenBy(row => row.KodaPl, StringComparer.Ordinal)
+            .ToList();
+
+        var remainingStockByKoda = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var koda in grouped.Select(g => g.Koda).Distinct(StringComparer.Ordinal))
+        {
+            var stock = await _sapClient.GetMaterialStockAsync(ToSapMaterial18(koda), _options.Plant, cancellationToken);
+            remainingStockByKoda[koda] = stock;
+        }
+
+        var rows = new List<ObrociParityRecord>(grouped.Count + 8);
+        var indeks = 1;
+        foreach (var row in grouped)
+        {
+            var remainingStock = remainingStockByKoda.TryGetValue(row.Koda, out var stock) ? stock : 0;
+            var zaloge = Math.Max(0, Math.Min(row.Kolic, remainingStock));
+            remainingStockByKoda[row.Koda] = Math.Max(0, remainingStock - zaloge);
+            var razlika = row.Kolic - zaloge;
+
+            rows.Add(new ObrociParityRecord(
+                Indeks: indeks++,
+                Zap: row.Zap,
+                Linija: row.Linija,
+                Koda: row.Koda,
+                KodaPl: row.KodaPl,
+                Naziv: row.Naziv,
+                Kolic: row.Kolic,
+                Zaloge: zaloge,
+                Pec: null,
+                Razlika: razlika,
+                RazlPec: null,
+                Dan: row.Dan,
+                Izmena: row.Izmena));
+        }
+
+        var vsotaDate = DateTime.Today.AddDays(-10);
+        for (var zap = 1; zap <= 8; zap++)
+        {
+            var zapRows = rows.Where(r => r.Zap == zap).ToList();
+            rows.Add(new ObrociParityRecord(
+                Indeks: indeks++,
+                Zap: zap,
+                Linija: 0,
+                Koda: "Vsota",
+                KodaPl: string.Empty,
+                Naziv: string.Empty,
+                Kolic: zapRows.Sum(r => r.Kolic),
+                Zaloge: zapRows.Sum(r => r.Zaloge),
+                Pec: null,
+                Razlika: zapRows.Sum(r => r.Razlika),
+                RazlPec: null,
+                Dan: vsotaDate,
+                Izmena: null));
+        }
+
+        return rows;
+    }
+
+    private static string BuildObrociPlateMatchKey(string orderNumber, string plateMaterial, int requiredQty)
+        => string.Concat(orderNumber?.Trim() ?? string.Empty, "|", plateMaterial?.Trim() ?? string.Empty, "|", requiredQty.ToString());
+
+    private static string ToSapMaterial18(string formattedMaterial)
+    {
+        if (string.IsNullOrWhiteSpace(formattedMaterial))
+        {
+            return string.Empty;
+        }
+
+        var digits = new string(formattedMaterial.Where(char.IsDigit).ToArray());
+        if (digits.Length >= 18)
+        {
+            return digits.Substring(0, 18);
+        }
+
+        if (digits.Length == 12)
+        {
+            return "0000" + digits.Substring(0, 2) + digits.Substring(2, 5) + digits.Substring(7, 3) + "00" + digits.Substring(10, 2);
+        }
+
+        return digits.PadLeft(18, '0');
     }
 
     private static string SanitizeFileToken(string value)
@@ -1801,6 +1912,16 @@ public sealed class PrenosJob
         public Dictionary<string, int> AfruCache { get; } = new(StringComparer.Ordinal);
         public HashSet<string> ProcessedSemiMaterials { get; } = new(StringComparer.Ordinal);
     }
+
+    private sealed record ObrociStageRow(
+        int Zap,
+        int Linija,
+        string Koda,
+        string KodaPl,
+        string Naziv,
+        int Kolic,
+        DateTime? Dan,
+        int? Izmena);
 
     private static string BuildProgressBar(int current, int total, int width)
     {

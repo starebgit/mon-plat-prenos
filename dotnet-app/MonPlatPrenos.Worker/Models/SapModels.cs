@@ -57,3 +57,18 @@ public sealed record SemiFinishedTrace(
     string SemiOrder,
     int AfruYieldDelta,
     DateTime CapturedAtUtc);
+
+public sealed record ObrociParityRecord(
+    int Indeks,
+    int Zap,
+    int Linija,
+    string Koda,
+    string KodaPl,
+    string Naziv,
+    int Kolic,
+    int Zaloge,
+    int? Pec,
+    int Razlika,
+    int? RazlPec,
+    DateTime? Dan,
+    int? Izmena);
