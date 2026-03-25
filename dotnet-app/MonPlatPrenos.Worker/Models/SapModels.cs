@@ -45,6 +45,7 @@ public sealed record UnifiedItem(
     string ComponentMaterial,
     string ComponentDescription,
     string Category,
+    int? Zap,
     int RequiredQty,
     DateTime CapturedAtUtc);
 

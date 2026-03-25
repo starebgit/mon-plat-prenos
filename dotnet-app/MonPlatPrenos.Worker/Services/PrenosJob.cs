@@ -347,7 +347,7 @@ public sealed class PrenosJob
                 return result;
             }
 
-            var totalYield = 0;
+            var perOperationMissing = new List<(SapOperation Operation, int MissingQty)>();
             var maxConcurrency = Math.Max(1, _options.ConfirmationConcurrency);
             if (maxConcurrency == 1 || validOperations.Count <= 1)
             {
@@ -361,7 +361,12 @@ public sealed class PrenosJob
                             cancellationToken,
                             () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken));
                     stats.ConfirmationRowsRead += confirmations.Count;
-                    totalYield += confirmations.Sum(c => c.Yield);
+                    var operationYield = confirmations.Sum(c => c.Yield);
+                    var missingQty = order.PlannedQuantity - operationYield;
+                    if (missingQty > 0)
+                    {
+                        perOperationMissing.Add((op, missingQty));
+                    }
                 }
             }
             else
@@ -379,7 +384,7 @@ public sealed class PrenosJob
                             sapCallSemaphore,
                             cancellationToken,
                             () => _sapClient.GetConfirmationsAsync(order.OrderNumber, op.Confirmation, cancellationToken)).ConfigureAwait(false);
-                        return (Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
+                        return (Operation: op, Count: confirmations.Count, Yield: confirmations.Sum(c => c.Yield));
                     }
                     finally
                     {
@@ -391,32 +396,37 @@ public sealed class PrenosJob
                 foreach (var item in confirmationResults)
                 {
                     stats.ConfirmationRowsRead += item.Count;
-                    totalYield += item.Yield;
+                    var missingQty = order.PlannedQuantity - item.Yield;
+                    if (missingQty > 0)
+                    {
+                        perOperationMissing.Add((item.Operation, missingQty));
+                    }
                 }
             }
 
-            var missingQty = order.PlannedQuantity - totalYield;
-            if (missingQty <= 0)
+            if (perOperationMissing.Count == 0)
             {
                 stats.SkippedByMissingQty++;
                 return result;
             }
 
-            var operationTrackCode = validOperations
-                .Select(o => o.WorkCenterCode)
-                .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code));
-            var track = ParseTrack(operationTrackCode ?? order.WorkCenterTrackCode);
             var formattedPlateMaterial = FormatMaterialLikeDelphi(order.Material);
-            result.PlateDemands.Add(new PlateDemandRecord(
-                Track: track,
-                Stev: null,
-                OrderNumber: order.OrderNumber,
-                Material: formattedPlateMaterial,
-                Quantity: missingQty,
-                StartDate: order.StartDate,
-                Dan: null,
-                Izmena: null));
-            stats.PlateRecordsWritten++;
+            foreach (var opResult in perOperationMissing)
+            {
+                var operationTrackCode = string.IsNullOrWhiteSpace(opResult.Operation.WorkCenterCode)
+                    ? order.WorkCenterTrackCode
+                    : opResult.Operation.WorkCenterCode;
+                result.PlateDemands.Add(new PlateDemandRecord(
+                    Track: ParseTrack(operationTrackCode),
+                    Stev: null,
+                    OrderNumber: order.OrderNumber,
+                    Material: formattedPlateMaterial,
+                    Quantity: opResult.MissingQty,
+                    StartDate: order.StartDate,
+                    Dan: null,
+                    Izmena: null));
+                stats.PlateRecordsWritten++;
+            }
 
             var components = await TimedSapCallAsync(
                 timing,
@@ -436,17 +446,21 @@ public sealed class PrenosJob
                         continue;
                     }
 
-                    result.Unified.Add(new UnifiedItem(
-                        order.OrderNumber,
-                        formattedPlateMaterial,
-                        FormatMaterialLikeDelphi(component.Material),
-                        component.Description,
-                        rule.Name,
-                        missingQty,
-                        DateTime.UtcNow));
+                    foreach (var opResult in perOperationMissing)
+                    {
+                        result.Unified.Add(new UnifiedItem(
+                            order.OrderNumber,
+                            formattedPlateMaterial,
+                            FormatMaterialLikeDelphi(component.Material),
+                            component.Description,
+                            rule.Name,
+                            ResolveZap(rule.Name, component.Description),
+                            opResult.MissingQty,
+                            DateTime.UtcNow));
 
-                    stats.UnifiedRowsWritten++;
-                    stats.AddCategoryHit(rule.Name);
+                        stats.UnifiedRowsWritten++;
+                        stats.AddCategoryHit(rule.Name);
+                    }
 
                     if (rule.Name.Equals("Samot", StringComparison.OrdinalIgnoreCase))
                     {
@@ -650,6 +664,7 @@ public sealed class PrenosJob
                 FormatMaterialLikeDelphi(semiComponent.Material),
                 $"AFRU delta for {subOrder.OrderNumber}",
                 $"{category}_AFRU",
+                null,
                 afruDelta,
                 DateTime.UtcNow));
             stats.UnifiedRowsWritten++;
@@ -703,6 +718,7 @@ public sealed class PrenosJob
                     FormatMaterialLikeDelphi(cmp.Material),
                     cmp.Description,
                     "Ulitki",
+                    null,
                     0,
                     DateTime.UtcNow));
                 stats.UnifiedRowsWritten++;
@@ -728,6 +744,7 @@ public sealed class PrenosJob
                     FormatMaterialLikeDelphi(cmp.Material),
                     cmp.Description,
                     "Spirala",
+                    null,
                     0,
                     DateTime.UtcNow));
                 stats.UnifiedRowsWritten++;
@@ -834,11 +851,49 @@ public sealed class PrenosJob
         foreach (var bucket in unifiedBuckets)
         {
             var bucketPath = Path.Combine(outputDirectory, $"{bucket.Key}-{stamp}.json");
-            var rows = bucket
-                .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
-                .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
-                .ThenBy(item => item.Category, StringComparer.Ordinal)
-                .ToList();
+            List<UnifiedItem> rows;
+            if (string.Equals(bucket.Key, "obroci", StringComparison.OrdinalIgnoreCase))
+            {
+                // Delphi parity: obroci table rows are accumulated in Zapissamot by (mat, mat_pl),
+                // then written once per grouped combination. Emit grouped JSON rows the same way.
+                rows = bucket
+                    .GroupBy(
+                        item => new
+                        {
+                            item.Zap,
+                            item.PlateMaterial,
+                            item.ComponentMaterial,
+                            item.ComponentDescription,
+                            item.Category
+                        })
+                    .Select(group =>
+                    {
+                        var first = group
+                            .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
+                            .First();
+                        return new UnifiedItem(
+                            OrderNumber: first.OrderNumber,
+                            PlateMaterial: group.Key.PlateMaterial,
+                            ComponentMaterial: group.Key.ComponentMaterial,
+                            ComponentDescription: group.Key.ComponentDescription,
+                            Category: group.Key.Category,
+                            Zap: group.Key.Zap,
+                            RequiredQty: group.Sum(item => item.RequiredQty),
+                            CapturedAtUtc: first.CapturedAtUtc);
+                    })
+                    .OrderBy(item => item.Zap)
+                    .ThenBy(item => item.PlateMaterial, StringComparer.Ordinal)
+                    .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
+                    .ToList();
+            }
+            else
+            {
+                rows = bucket
+                    .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
+                    .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
+                    .ThenBy(item => item.Category, StringComparer.Ordinal)
+                    .ToList();
+            }
             await WriteAllTextCompatAsync(bucketPath, JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         }
 
@@ -885,6 +940,54 @@ public sealed class PrenosJob
         }
 
         return SanitizeFileToken(normalized);
+    }
+
+    private static int? ResolveZap(string category, string componentDescription)
+    {
+        if (!string.Equals(category, "Obroc", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return TipObroca(componentDescription);
+    }
+
+    private static int TipObroca(string description)
+    {
+        var normalized = (description ?? string.Empty).Trim().ToUpperInvariant();
+        bool Has(string token) => normalized.IndexOf(token, StringComparison.Ordinal) >= 0;
+
+        // Delphi parity (transfer.pas TipObroca):
+        // 220=>1, 180=>2, 145=>3, 80/110/115=>4, and add +4 when "-4" is present.
+        var zap = 4;
+        if (Has("OBROČ 220") || Has("OBROC 220"))
+        {
+            zap = 1;
+        }
+        else if (Has("OBROČ 180") || Has("OBROC 180"))
+        {
+            zap = 2;
+        }
+        else if (Has("OBROČ 145") || Has("OBROC 145"))
+        {
+            zap = 3;
+        }
+        else if (Has("OBROČ 80")
+                 || Has("OBROC 80")
+                 || Has("OBROČ 110")
+                 || Has("OBROC 110")
+                 || Has("OBROČ 115")
+                 || Has("OBROC 115"))
+        {
+            zap = 4;
+        }
+
+        if (Has("-4"))
+        {
+            zap += 4;
+        }
+
+        return zap;
     }
 
     private static string SanitizeFileToken(string value)
