@@ -55,7 +55,7 @@ public static class Program
                 var outputDirectory = string.IsNullOrWhiteSpace(options.OutputDirectory) ? "output" : options.OutputDirectory;
                 Directory.CreateDirectory(outputDirectory);
                 var reportPath = Path.Combine(outputDirectory, $"sap-discovery-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-                await File.WriteAllTextAsync(reportPath, report).ConfigureAwait(false);
+                File.WriteAllText(reportPath, report);
                 Console.WriteLine(report);
                 Console.WriteLine($"SAP discovery report written to: {reportPath}");
 
