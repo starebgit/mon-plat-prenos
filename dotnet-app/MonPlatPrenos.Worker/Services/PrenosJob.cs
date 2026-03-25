@@ -437,6 +437,24 @@ public sealed class PrenosJob
                 () => _sapClient.GetComponentsAsync(order.OrderNumber, cancellationToken));
             stats.ComponentRowsRead += components.Count;
 
+            var obrocRule = allRules.FirstOrDefault(rule => rule.Name.Equals("Obroc", StringComparison.OrdinalIgnoreCase));
+            if (obrocRule is not null)
+            {
+                var obrocCandidates = components
+                    .Where(component => obrocRule.IsMatch(component.Description))
+                    .Select(component => $"{FormatMaterialLikeDelphi(component.Material)}::{component.Description?.Trim()}")
+                    .ToList();
+
+                if (obrocCandidates.Count > 0)
+                {
+                    var selectedByDelphiLastMatch = obrocCandidates[^1];
+                    WriteDiagnosticLine(
+                        $"OBROC_CANDIDATES order={order.OrderNumber} plate={formattedPlateMaterial} " +
+                        $"count={obrocCandidates.Count} selectedLast=\"{selectedByDelphiLastMatch}\" " +
+                        $"candidates=\"{string.Join(" || ", obrocCandidates)}\"");
+                }
+            }
+
             foreach (var component in components)
             {
                 foreach (var rule in allRules)
