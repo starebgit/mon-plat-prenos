@@ -851,11 +851,49 @@ public sealed class PrenosJob
         foreach (var bucket in unifiedBuckets)
         {
             var bucketPath = Path.Combine(outputDirectory, $"{bucket.Key}-{stamp}.json");
-            var rows = bucket
-                .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
-                .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
-                .ThenBy(item => item.Category, StringComparer.Ordinal)
-                .ToList();
+            List<UnifiedItem> rows;
+            if (string.Equals(bucket.Key, "obroci", StringComparison.OrdinalIgnoreCase))
+            {
+                // Delphi parity: obroci table rows are accumulated in Zapissamot by (mat, mat_pl),
+                // then written once per grouped combination. Emit grouped JSON rows the same way.
+                rows = bucket
+                    .GroupBy(
+                        item => new
+                        {
+                            item.Zap,
+                            item.PlateMaterial,
+                            item.ComponentMaterial,
+                            item.ComponentDescription,
+                            item.Category
+                        })
+                    .Select(group =>
+                    {
+                        var first = group
+                            .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
+                            .First();
+                        return new UnifiedItem(
+                            OrderNumber: first.OrderNumber,
+                            PlateMaterial: group.Key.PlateMaterial,
+                            ComponentMaterial: group.Key.ComponentMaterial,
+                            ComponentDescription: group.Key.ComponentDescription,
+                            Category: group.Key.Category,
+                            Zap: group.Key.Zap,
+                            RequiredQty: group.Sum(item => item.RequiredQty),
+                            CapturedAtUtc: first.CapturedAtUtc);
+                    })
+                    .OrderBy(item => item.Zap)
+                    .ThenBy(item => item.PlateMaterial, StringComparer.Ordinal)
+                    .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
+                    .ToList();
+            }
+            else
+            {
+                rows = bucket
+                    .OrderBy(item => item.OrderNumber, StringComparer.Ordinal)
+                    .ThenBy(item => item.ComponentMaterial, StringComparer.Ordinal)
+                    .ThenBy(item => item.Category, StringComparer.Ordinal)
+                    .ToList();
+            }
             await WriteAllTextCompatAsync(bucketPath, JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         }
 
