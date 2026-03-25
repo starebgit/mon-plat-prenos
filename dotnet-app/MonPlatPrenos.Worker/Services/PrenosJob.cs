@@ -994,7 +994,7 @@ public sealed class PrenosJob
             staged.Add(new ObrociStageRow(
                 Zap: item.Zap ?? TipObroca(item.ComponentDescription),
                 Linija: plate?.Stev ?? 0,
-                Koda: item.ComponentMaterial,
+                Koda: ToDelphiSemiCode(item.ComponentMaterial),
                 KodaPl: item.PlateMaterial,
                 Naziv: item.ComponentDescription,
                 Kolic: item.RequiredQty,
@@ -1003,16 +1003,16 @@ public sealed class PrenosJob
         }
 
         var grouped = staged
-            .GroupBy(row => new { row.Zap, row.Koda, row.KodaPl, row.Naziv, row.Linija })
+            .GroupBy(row => new { row.Zap, row.Koda, row.KodaPl, row.Naziv })
             .Select(group =>
             {
                 var first = group.First();
                 return new ObrociStageRow(
-                    Zap: group.Key.Zap,
-                    Linija: group.Key.Linija,
-                    Koda: group.Key.Koda,
-                    KodaPl: group.Key.KodaPl,
-                    Naziv: group.Key.Naziv,
+                    Zap: first.Zap,
+                    Linija: first.Linija,
+                    Koda: first.Koda,
+                    KodaPl: first.KodaPl,
+                    Naziv: first.Naziv,
                     Kolic: group.Sum(x => x.Kolic),
                     Dan: first.Dan,
                     Izmena: first.Izmena);
@@ -1095,10 +1095,34 @@ public sealed class PrenosJob
 
         if (digits.Length == 12)
         {
-            return "0000" + digits.Substring(0, 2) + digits.Substring(2, 5) + digits.Substring(7, 3) + "00" + digits.Substring(10, 2);
+            return digits + "000000";
         }
 
         return digits.PadLeft(18, '0');
+    }
+
+    private static string ToDelphiSemiCode(string material)
+    {
+        if (string.IsNullOrWhiteSpace(material))
+        {
+            return string.Empty;
+        }
+
+        var digits = new string(material.Where(char.IsDigit).ToArray());
+        if (digits.Length < 12)
+        {
+            digits = digits.PadLeft(12, '0');
+        }
+        else if (digits.Length > 12)
+        {
+            digits = digits.Substring(0, 12);
+        }
+
+        return string.Concat(
+            digits.Substring(0, 5), ".",
+            digits.Substring(5, 3), ".",
+            digits.Substring(8, 2), "/",
+            digits.Substring(10, 2));
     }
 
     private static string SanitizeFileToken(string value)
