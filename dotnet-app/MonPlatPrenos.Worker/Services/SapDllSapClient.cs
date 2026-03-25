@@ -371,6 +371,53 @@ public sealed class SapDllSapClient : ISapClient
         return Task.FromResult(yi1 - yi2);
     }
 
+    public Task<int> GetMaterialStockAsync(string material18, string plant, CancellationToken cancellationToken)
+    {
+        var function = CreateFunction("BAPI_MATERIAL_STOCK_REQ_LIST");
+        SetImport(function, "MATERIAL", material18);
+        SetImport(function, "PLANT", plant);
+
+        var invokeSw = Stopwatch.StartNew();
+        InvokeFunction(function);
+        AddDetailedTiming("GetMaterialStock.Invoke", invokeSw.ElapsedMilliseconds);
+
+        var parseSw = Stopwatch.StartNew();
+        var stock = ReadMaterialStockWithDelphiParity(function);
+        AddDetailedTiming("GetMaterialStock.Parse", parseSw.ElapsedMilliseconds);
+        return Task.FromResult(stock);
+    }
+
+    private static int ReadMaterialStockWithDelphiParity(object function)
+    {
+        // Delphi parity: funct1.imports('MRP_LIST').value(48)
+        var importObject = GetImportObject(function, "MRP_LIST");
+        var stock = ParseInt(GetByIndex(importObject, 48));
+        if (stock != 0)
+        {
+            return stock;
+        }
+
+        // Fallback for NCo environments where MRP_LIST is exposed as structure.
+        var structure = GetStructure(function, "MRP_LIST");
+        stock = ParseInt(GetByIndex(structure, 48));
+        if (stock != 0)
+        {
+            return stock;
+        }
+
+        // Conservative named fallbacks.
+        foreach (var fieldName in new[] { "LABST", "TOTAL_STOCK", "TOT_STOCK", "STOCK" })
+        {
+            stock = ParseInt(GetString(structure, fieldName));
+            if (stock != 0)
+            {
+                return stock;
+            }
+        }
+
+        return 0;
+    }
+
     private IReadOnlyList<SapOrderHeader> ParsePlateOrderHeadersReflection(object orderHeader, string defaultPlant, string schedulerCode)
     {
         var results = new List<SapOrderHeader>();
@@ -622,11 +669,9 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var yield = ParseInt(GetString(row, _fieldMap.Confirmation.Yield));
-            if (yield == 0)
-            {
-                yield = LoadConfirmationDetailYieldReflection(confNo, confCounter);
-            }
+            // Delphi parity: confirmation yield is read from BAPI_PRODORDCONF_GETDETAIL
+            // for every confirmation row (not only when list-level yield is zero).
+            var yield = LoadConfirmationDetailYieldReflection(confNo, confCounter);
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
@@ -666,11 +711,9 @@ public sealed class SapDllSapClient : ISapClient
                 continue;
             }
 
-            var yield = ParseInt(SafeGetFastField(getField, row, _fieldMap.Confirmation.Yield));
-            if (yield == 0)
-            {
-                yield = LoadConfirmationDetailYieldFast(confNo, confCounter);
-            }
+            // Delphi parity: confirmation yield is read from BAPI_PRODORDCONF_GETDETAIL
+            // for every confirmation row (not only when list-level yield is zero).
+            var yield = LoadConfirmationDetailYieldFast(confNo, confCounter);
 
             results.Add(new SapConfirmation(confNo.Trim(), confCounter.Trim(), yield));
         }
@@ -1527,6 +1570,85 @@ public sealed class SapDllSapClient : ISapClient
             value = string.Empty;
             return false;
         }
+    }
+
+    private static string GetByIndex(object rowOrStructure, int index)
+    {
+        if (rowOrStructure is null)
+        {
+            return string.Empty;
+        }
+
+        var type = rowOrStructure.GetType();
+        var getString = type.GetMethod("GetString", new[] { typeof(int) });
+        if (getString is not null)
+        {
+            try
+            {
+                var value = getString.Invoke(rowOrStructure, new object[] { index });
+                return NormalizeString(value);
+            }
+            catch
+            {
+                // fallback below
+            }
+        }
+
+        var getValue = type.GetMethod("GetValue", new[] { typeof(int) });
+        if (getValue is not null)
+        {
+            try
+            {
+                var value = getValue.Invoke(rowOrStructure, new object[] { index });
+                return NormalizeString(value);
+            }
+            catch
+            {
+                // fallback below
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static object? GetImportObject(object function, string importName)
+    {
+        var functionType = function.GetType();
+        var importsProperty = functionType.GetProperty("Imports");
+        var importsObject = importsProperty?.GetValue(function);
+        if (importsObject is null)
+        {
+            return null;
+        }
+
+        var importsType = importsObject.GetType();
+        var itemMethod = importsType.GetMethod("Item", new[] { typeof(string) });
+        if (itemMethod is not null)
+        {
+            try
+            {
+                return itemMethod.Invoke(importsObject, new object[] { importName });
+            }
+            catch
+            {
+                // try indexer fallback
+            }
+        }
+
+        var indexer = importsType.GetProperty("Item", new[] { typeof(string) });
+        if (indexer is not null)
+        {
+            try
+            {
+                return indexer.GetValue(importsObject, new object[] { importName });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     private static int DigitsOnly(string input)

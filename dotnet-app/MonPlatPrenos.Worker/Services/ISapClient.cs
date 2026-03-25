@@ -31,4 +31,6 @@ public interface ISapClient
         CancellationToken cancellationToken);
 
     Task<int> GetAfruYieldDeltaAsync(string orderNumber, DateTime fromDate, CancellationToken cancellationToken);
+
+    Task<int> GetMaterialStockAsync(string material18, string plant, CancellationToken cancellationToken);
 }
