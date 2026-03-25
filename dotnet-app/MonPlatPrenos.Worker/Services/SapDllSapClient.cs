@@ -387,6 +387,98 @@ public sealed class SapDllSapClient : ISapClient
         return Task.FromResult(stock);
     }
 
+    public Task<string> BuildDiscoveryReportAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var sb = new StringBuilder();
+        sb.AppendLine("SAP DISCOVERY REPORT");
+        sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        var login = GetLoginPreview();
+        sb.AppendLine($"LoginSource: {login.LoginSource}");
+        sb.AppendLine($"LoginMessage: {login.LoginMessage}");
+        sb.AppendLine($"DestinationName: {login.DestinationName}");
+        sb.AppendLine($"AppServerHost: {login.AppServerHost}");
+        sb.AppendLine($"SystemNumber: {login.SystemNumber}");
+        sb.AppendLine($"Client: {login.Client}");
+        sb.AppendLine($"User: {login.User}");
+        sb.AppendLine($"Language: {login.Language}");
+        sb.AppendLine();
+
+        AppendFunctionDiscovery(sb, "BAPI_PRODORD_GET_LIST", "ORDER_HEADER");
+        AppendFunctionDiscovery(sb, "BAPI_PRODORD_GET_DETAIL", "OPERATION", "COMPONENT", "ORDER_OBJECTS");
+        AppendFunctionDiscovery(sb, "BAPI_PRODORDCONF_GETLIST", "CONFIRMATIONS");
+        AppendFunctionDiscovery(sb, "BAPI_PRODORDCONF_GETDETAIL", "CONF_DETAIL");
+        AppendFunctionDiscovery(sb, "ZETA_RFC_READ_AFRU", "IT_AFRU");
+        AppendFunctionDiscovery(sb, "BAPI_MATERIAL_STOCK_REQ_LIST", "MRP_LIST");
+
+        return Task.FromResult(sb.ToString());
+    }
+
+    public Task ValidateConfigurationAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var errors = new List<string>();
+
+        ValidateFunctionParameters(errors, "BAPI_PRODORD_GET_LIST", "PRODPLANT_RANGE", "PROD_SCHED_RANGE", "ORDER_NUMBER_RANGE", "MATERIAL_RANGE", "ORDER_HEADER");
+        ValidateFunctionParameters(errors, "BAPI_PRODORD_GET_DETAIL", "NUMBER", "ORDER_OBJECTS", "OPERATION", "COMPONENT");
+        ValidateFunctionParameters(errors, "BAPI_PRODORDCONF_GETLIST", "ORDER_RANGE", "CONF_RANGE", "CONFIRMATIONS");
+        ValidateFunctionParameters(errors, "BAPI_PRODORDCONF_GETDETAIL", "CONFIRMATION", "CONFIRMATIONCOUNTER", "CONF_DETAIL");
+        ValidateFunctionParameters(errors, "ZETA_RFC_READ_AFRU", "dday", "stnal", "IT_AFRU");
+        ValidateFunctionParameters(errors, "BAPI_MATERIAL_STOCK_REQ_LIST", "MATERIAL", "PLANT", "MRP_LIST");
+
+        ValidateFields(errors, "BAPI_PRODORD_GET_LIST", "ORDER_HEADER",
+            _fieldMap.OrderHeader.OrderNumber,
+            _fieldMap.OrderHeader.Material,
+            _fieldMap.OrderHeader.SystemStatus,
+            _fieldMap.OrderHeader.PlannedQuantity,
+            _fieldMap.OrderHeader.StartDate,
+            _fieldMap.OrderHeader.SchedulerCode,
+            _fieldMap.OrderHeader.Plant,
+            _fieldMap.OrderHeader.WorkCenter);
+
+        ValidateFields(errors, "BAPI_PRODORD_GET_DETAIL", "OPERATION",
+            _fieldMap.Operation.Confirmation,
+            _fieldMap.Operation.OperationCode,
+            _fieldMap.Operation.StepCode,
+            _fieldMap.Operation.ConfirmableQuantity,
+            _fieldMap.Operation.WorkCenterCode);
+
+        ValidateFields(errors, "BAPI_PRODORD_GET_DETAIL", "COMPONENT",
+            _fieldMap.Component.Material,
+            _fieldMap.Component.Description);
+
+        ValidateFields(errors, "BAPI_PRODORD_GET_DETAIL", "ORDER_OBJECTS",
+            "OPERATION",
+            "COMPONENT");
+
+        ValidateFields(errors, "BAPI_PRODORDCONF_GETLIST", "CONFIRMATIONS",
+            _fieldMap.Confirmation.Confirmation,
+            _fieldMap.Confirmation.ConfirmationCounter);
+
+        ValidateFields(errors, "BAPI_PRODORDCONF_GETDETAIL", "CONF_DETAIL",
+            _fieldMap.Confirmation.DetailYield);
+
+        ValidateFields(errors, "ZETA_RFC_READ_AFRU", "IT_AFRU",
+            _fieldMap.Afru.WorkCenterId,
+            _fieldMap.Afru.Yield,
+            _fieldMap.Afru.Reversed);
+
+        var mrpFields = GetContainerFieldNames("BAPI_MATERIAL_STOCK_REQ_LIST", "MRP_LIST");
+        if (mrpFields.Count > 0 && mrpFields.Count < 48)
+        {
+            errors.Add($"BAPI_MATERIAL_STOCK_REQ_LIST.MRP_LIST has {mrpFields.Count} fields, but code reads index 48 with Delphi parity.");
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException("SAP preflight validation failed:\n - " + string.Join("\n - ", errors));
+        }
+
+        return Task.CompletedTask;
+    }
+
     private static int ReadMaterialStockWithDelphiParity(object function)
     {
         // Delphi parity: funct1.imports('MRP_LIST').value(48)
@@ -416,6 +508,216 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         return 0;
+    }
+
+    private void AppendFunctionDiscovery(StringBuilder sb, string functionName, params string[] containersToInspect)
+    {
+        sb.AppendLine(new string('-', 72));
+        sb.AppendLine($"Function: {functionName}");
+
+        try
+        {
+            var function = CreateFunction(functionName);
+            var paramNames = GetFunctionParameterNames(function);
+            sb.AppendLine($"Parameters ({paramNames.Count}): {(paramNames.Count == 0 ? "<none>" : string.Join(", ", paramNames))}");
+
+            foreach (var container in containersToInspect.Distinct(StringComparer.Ordinal))
+            {
+                var fields = GetContainerFieldNames(functionName, container);
+                if (fields.Count == 0)
+                {
+                    sb.AppendLine($"  {container}: <metadata unavailable>");
+                    continue;
+                }
+
+                sb.AppendLine($"  {container} fields ({fields.Count}):");
+                for (var i = 0; i < fields.Count; i++)
+                {
+                    sb.AppendLine($"    [{i + 1}] {fields[i]}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"ERROR reading metadata: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private void ValidateFunctionParameters(List<string> errors, string functionName, params string[] expectedNames)
+    {
+        try
+        {
+            var function = CreateFunction(functionName);
+            var actual = new HashSet<string>(GetFunctionParameterNames(function), StringComparer.OrdinalIgnoreCase);
+            foreach (var expected in expectedNames.Where(x => !string.IsNullOrWhiteSpace(x)))
+            {
+                if (!actual.Contains(expected))
+                {
+                    errors.Add($"{functionName}: missing parameter '{expected}'.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"{functionName}: metadata lookup failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private void ValidateFields(List<string> errors, string functionName, string containerName, params string[] expectedFields)
+    {
+        var actualFields = GetContainerFieldNames(functionName, containerName);
+        if (actualFields.Count == 0)
+        {
+            errors.Add($"{functionName}.{containerName}: no field metadata available.");
+            return;
+        }
+
+        var set = new HashSet<string>(actualFields, StringComparer.OrdinalIgnoreCase);
+        foreach (var expected in expectedFields.Where(x => !string.IsNullOrWhiteSpace(x)))
+        {
+            if (!set.Contains(expected))
+            {
+                errors.Add($"{functionName}.{containerName}: missing field '{expected}'.");
+            }
+        }
+    }
+
+    private IReadOnlyList<string> GetFunctionParameterNames(object function)
+    {
+        var metadata = function.GetType().GetProperty("Metadata")?.GetValue(function);
+        if (metadata is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        return ExtractNamesFromMetadata(metadata);
+    }
+
+    private IReadOnlyList<string> GetContainerFieldNames(string functionName, string containerName)
+    {
+        try
+        {
+            var function = CreateFunction(functionName);
+            object? container = TryGetTable(function, containerName)
+                                ?? TryGetStructure(function, containerName)
+                                ?? GetImportObject(function, containerName);
+
+            if (container is null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return ExtractFieldNames(container);
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private static object? TryGetTable(object function, string tableName)
+    {
+        try
+        {
+            return GetTable(function, tableName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object? TryGetStructure(object function, string structureName)
+    {
+        try
+        {
+            return GetStructure(function, structureName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractFieldNames(object container)
+    {
+        var metadata = container.GetType().GetProperty("Metadata")?.GetValue(container);
+        if (metadata is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var direct = ExtractNamesFromMetadata(metadata);
+        if (direct.Count > 0)
+        {
+            return direct;
+        }
+
+        var lineType = metadata.GetType().GetProperty("LineType")?.GetValue(metadata);
+        if (lineType is not null)
+        {
+            var lineNames = ExtractNamesFromMetadata(lineType);
+            if (lineNames.Count > 0)
+            {
+                return lineNames;
+            }
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static IReadOnlyList<string> ExtractNamesFromMetadata(object metadata)
+    {
+        var count = GetMetadataCount(metadata);
+        if (count <= 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var getByIndex = metadata.GetType().GetMethod("get_Item", new[] { typeof(int) })
+                         ?? metadata.GetType().GetMethod("Item", new[] { typeof(int) });
+        if (getByIndex is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var names = new List<string>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var item = getByIndex.Invoke(metadata, new object[] { i });
+            if (item is null)
+            {
+                continue;
+            }
+
+            var name = Convert.ToString(item.GetType().GetProperty("Name")?.GetValue(item), CultureInfo.InvariantCulture);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                names.Add(name);
+            }
+        }
+
+        return names;
+    }
+
+    private static int GetMetadataCount(object metadata)
+    {
+        var type = metadata.GetType();
+        var countProperty = type.GetProperty("Count")
+                           ?? type.GetProperty("FieldCount")
+                           ?? type.GetProperty("ParameterCount");
+        if (countProperty is null)
+        {
+            return 0;
+        }
+
+        var raw = countProperty.GetValue(metadata);
+        if (raw is null)
+        {
+            return 0;
+        }
+
+        return Convert.ToInt32(raw, CultureInfo.InvariantCulture);
     }
 
     private IReadOnlyList<SapOrderHeader> ParsePlateOrderHeadersReflection(object orderHeader, string defaultPlant, string schedulerCode)

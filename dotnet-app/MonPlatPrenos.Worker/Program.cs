@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +16,7 @@ public static class Program
     {
         var runOnce = args.Any(a => string.Equals(a, "--run-once", StringComparison.OrdinalIgnoreCase));
         var runParityBenchmark = args.Any(a => string.Equals(a, "--parity-benchmark", StringComparison.OrdinalIgnoreCase));
+        var runSapPreflight = args.Any(a => string.Equals(a, "--sap-preflight", StringComparison.OrdinalIgnoreCase));
         if (runParityBenchmark)
         {
             runOnce = true;
@@ -40,6 +42,29 @@ public static class Program
                 services.AddHostedService<SchedulerWorker>();
             })
             .Build();
+
+        if (runSapPreflight)
+        {
+            using (var scope = host.Services.CreateScope())
+            {
+                var options = scope.ServiceProvider.GetRequiredService<IOptions<PrenosOptions>>().Value;
+                var sapClient = scope.ServiceProvider.GetRequiredService<ISapClient>();
+
+                Console.WriteLine("RUN SAP PREFLIGHT (discovery + validation)");
+                var report = await sapClient.BuildDiscoveryReportAsync(System.Threading.CancellationToken.None).ConfigureAwait(false);
+                var outputDirectory = string.IsNullOrWhiteSpace(options.OutputDirectory) ? "output" : options.OutputDirectory;
+                Directory.CreateDirectory(outputDirectory);
+                var reportPath = Path.Combine(outputDirectory, $"sap-discovery-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+                await File.WriteAllTextAsync(reportPath, report).ConfigureAwait(false);
+                Console.WriteLine(report);
+                Console.WriteLine($"SAP discovery report written to: {reportPath}");
+
+                await sapClient.ValidateConfigurationAsync(System.Threading.CancellationToken.None).ConfigureAwait(false);
+                Console.WriteLine("SAP preflight validation passed.");
+            }
+
+            return 0;
+        }
 
         if (runOnce)
         {
