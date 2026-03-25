@@ -982,6 +982,7 @@ public sealed class PrenosJob
                 StringComparer.Ordinal);
 
         var staged = new List<ObrociStageRow>(obrociItems.Count);
+        var seq = 0;
         foreach (var item in obrociItems)
         {
             var key = BuildObrociPlateMatchKey(item.OrderNumber, item.PlateMaterial, item.RequiredQty);
@@ -992,6 +993,7 @@ public sealed class PrenosJob
             }
 
             staged.Add(new ObrociStageRow(
+                Seq: seq++,
                 Zap: item.Zap ?? TipObroca(item.ComponentDescription),
                 Linija: plate?.Stev ?? 0,
                 Koda: ToDelphiSemiCode(item.ComponentMaterial),
@@ -1008,6 +1010,7 @@ public sealed class PrenosJob
             {
                 var first = group.First();
                 return new ObrociStageRow(
+                    Seq: group.Min(x => x.Seq),
                     Zap: first.Zap,
                     Linija: first.Linija,
                     Koda: first.Koda,
@@ -1017,9 +1020,7 @@ public sealed class PrenosJob
                     Dan: first.Dan,
                     Izmena: first.Izmena);
             })
-            .OrderBy(row => row.Zap)
-            .ThenBy(row => row.Koda, StringComparer.Ordinal)
-            .ThenBy(row => row.KodaPl, StringComparer.Ordinal)
+            .OrderBy(row => row.Seq)
             .ToList();
 
         var remainingStockByKoda = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -1938,6 +1939,7 @@ public sealed class PrenosJob
     }
 
     private sealed record ObrociStageRow(
+        int Seq,
         int Zap,
         int Linija,
         string Koda,

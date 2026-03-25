@@ -382,11 +382,40 @@ public sealed class SapDllSapClient : ISapClient
         AddDetailedTiming("GetMaterialStock.Invoke", invokeSw.ElapsedMilliseconds);
 
         var parseSw = Stopwatch.StartNew();
-        var mrpList = GetStructure(function, "MRP_LIST");
-        // Delphi parity uses imports('MRP_LIST').value(48).
-        var stock = ParseInt(GetByIndex(mrpList, 48));
+        var stock = ReadMaterialStockWithDelphiParity(function);
         AddDetailedTiming("GetMaterialStock.Parse", parseSw.ElapsedMilliseconds);
         return Task.FromResult(stock);
+    }
+
+    private static int ReadMaterialStockWithDelphiParity(object function)
+    {
+        // Delphi parity: funct1.imports('MRP_LIST').value(48)
+        var importObject = GetImportObject(function, "MRP_LIST");
+        var stock = ParseInt(GetByIndex(importObject, 48));
+        if (stock != 0)
+        {
+            return stock;
+        }
+
+        // Fallback for NCo environments where MRP_LIST is exposed as structure.
+        var structure = GetStructure(function, "MRP_LIST");
+        stock = ParseInt(GetByIndex(structure, 48));
+        if (stock != 0)
+        {
+            return stock;
+        }
+
+        // Conservative named fallbacks.
+        foreach (var fieldName in new[] { "LABST", "TOTAL_STOCK", "TOT_STOCK", "STOCK" })
+        {
+            stock = ParseInt(GetString(structure, fieldName));
+            if (stock != 0)
+            {
+                return stock;
+            }
+        }
+
+        return 0;
     }
 
     private IReadOnlyList<SapOrderHeader> ParsePlateOrderHeadersReflection(object orderHeader, string defaultPlant, string schedulerCode)
@@ -1545,6 +1574,11 @@ public sealed class SapDllSapClient : ISapClient
 
     private static string GetByIndex(object rowOrStructure, int index)
     {
+        if (rowOrStructure is null)
+        {
+            return string.Empty;
+        }
+
         var type = rowOrStructure.GetType();
         var getString = type.GetMethod("GetString", new[] { typeof(int) });
         if (getString is not null)
@@ -1575,6 +1609,46 @@ public sealed class SapDllSapClient : ISapClient
         }
 
         return string.Empty;
+    }
+
+    private static object? GetImportObject(object function, string importName)
+    {
+        var functionType = function.GetType();
+        var importsProperty = functionType.GetProperty("Imports");
+        var importsObject = importsProperty?.GetValue(function);
+        if (importsObject is null)
+        {
+            return null;
+        }
+
+        var importsType = importsObject.GetType();
+        var itemMethod = importsType.GetMethod("Item", new[] { typeof(string) });
+        if (itemMethod is not null)
+        {
+            try
+            {
+                return itemMethod.Invoke(importsObject, new object[] { importName });
+            }
+            catch
+            {
+                // try indexer fallback
+            }
+        }
+
+        var indexer = importsType.GetProperty("Item", new[] { typeof(string) });
+        if (indexer is not null)
+        {
+            try
+            {
+                return indexer.GetValue(importsObject, new object[] { importName });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     private static int DigitsOnly(string input)
