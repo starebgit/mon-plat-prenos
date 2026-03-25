@@ -447,7 +447,7 @@ public sealed class PrenosJob
 
                 if (obrocCandidates.Count > 0)
                 {
-                    var selectedByDelphiLastMatch = obrocCandidates[^1];
+                    var selectedByDelphiLastMatch = obrocCandidates[obrocCandidates.Count - 1];
                     WriteDiagnosticLine(
                         $"OBROC_CANDIDATES order={order.OrderNumber} plate={formattedPlateMaterial} " +
                         $"count={obrocCandidates.Count} selectedLast=\"{selectedByDelphiLastMatch}\" " +
