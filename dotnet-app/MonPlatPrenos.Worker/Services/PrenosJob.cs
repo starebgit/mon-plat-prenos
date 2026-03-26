@@ -17,8 +17,6 @@ public sealed class PrenosJob
 {
     private readonly ISapClient _sapClient;
     private readonly PrenosOptions _options;
-    private readonly object _diagnosticsLogSync = new object();
-    private string? _diagnosticsLogPath;
     public PrenosJob(ISapClient sapClient, IOptions<PrenosOptions> options)
     {
         _sapClient = sapClient;
@@ -31,23 +29,15 @@ public sealed class PrenosJob
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
         var runSw = Stopwatch.StartNew();
-        var parityBenchmarkModeEnabled = _options.ParityBenchmarkMode.Enabled;
-        var parityModeEnabled = _options.ParityMode.Enabled || parityBenchmarkModeEnabled;
-        var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
+        var benchmarkEnabled = _options.Benchmark.Enabled;
         var outputDirectory = GetOutputDirectoryPath();
-        InitializeDiagnosticsLog(outputDirectory);
-        var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
+        var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled: true);
         var activeFromDateFilter = effectiveFromDate;
 
         var plant = _options.Plant;
-        var orderFrom = ResolveOrderFrom(parityModeEnabled);
-        Console.WriteLine($"Run mode: {(parityBenchmarkModeEnabled ? "PARITY-BENCHMARK" : parityModeEnabled ? "PARITY" : "NORMAL")}");
+        var orderFrom = ResolveOrderFrom(parityModeEnabled: true);
         Console.WriteLine($"Output directory: {outputDirectory}");
         Console.WriteLine($"Effective fromDate: {(activeFromDateFilter.HasValue ? activeFromDateFilter.Value.ToString("yyyy-MM-dd") : "ALL")}, orderFrom: {orderFrom}");
-        if (!string.IsNullOrWhiteSpace(_diagnosticsLogPath))
-        {
-            Console.WriteLine($"Diagnostics log: {_diagnosticsLogPath}");
-        }
 
         var stats = new ProcessingStats();
         var status = new ProgressStatus();
@@ -142,15 +132,7 @@ public sealed class PrenosJob
                 cancellationToken);
         }
 
-        if (parityBenchmarkModeEnabled)
-        {
-            await WriteParityBenchmarkRunLogAsync(runtimeMs, activeFromDateFilter, orderFrom, plateDemands.Count, unified.Count, semiFinished.Count, cancellationToken);
-        }
-
-        if (!parityModeEnabled)
-        {
-            TryPersistOrderFromWatermark(maxFetchedOrderNumber);
-        }
+        // Intentionally no watermark persistence: parity behavior is always-on for this worker.
     }
 
     private DateTime? ResolveFromDate(DateTime? requestedFromDate, bool parityModeEnabled)
@@ -1293,43 +1275,15 @@ public sealed class PrenosJob
         }
     }
 
-    private async Task WriteParityBenchmarkRunLogAsync(
-        long runtimeMs,
-        DateTime? effectiveFromDate,
-        string effectiveOrderFrom,
-        int platesCount,
-        int unifiedCount,
-        int semiFinishedCount,
-        CancellationToken cancellationToken)
-    {
-        var outputDirectory = GetOutputDirectoryPath();
-        Directory.CreateDirectory(outputDirectory);
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var path = Path.Combine(outputDirectory, $"parity-benchmark-run-{stamp}.log");
-        var lines = new[]
-        {
-            "MODE=PARITY_BENCHMARK",
-            $"UTC={DateTime.UtcNow:O}",
-            $"FROM_DATE={(effectiveFromDate.HasValue ? effectiveFromDate.Value.ToString("yyyy-MM-dd") : "ALL")}",
-            $"ORDER_FROM={effectiveOrderFrom}",
-            $"RUNTIME_MS={runtimeMs}",
-            $"PLATES={platesCount}",
-            $"UNIFIED={unifiedCount}",
-            $"SEMI_FINISHED={semiFinishedCount}",
-            $"OUTPUT_DIR={outputDirectory}"
-        };
-
-        await WriteAllTextCompatAsync(path, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
-        Console.WriteLine($"Parity benchmark run log written: {path}");
-    }
-
     private (string? FixedFromDate, string? FixedOrderFrom, string SourceKey) GetParityLockValues()
     {
-        if (_options.ParityBenchmarkMode.Enabled)
+        var benchmarkFromDate = _options.ParityBenchmarkMode.FixedFromDate?.Trim();
+        var benchmarkOrderFrom = _options.ParityBenchmarkMode.FixedOrderFrom?.Trim();
+        if (!string.IsNullOrWhiteSpace(benchmarkFromDate) && !string.IsNullOrWhiteSpace(benchmarkOrderFrom))
         {
             return (
-                _options.ParityBenchmarkMode.FixedFromDate?.Trim(),
-                _options.ParityBenchmarkMode.FixedOrderFrom?.Trim(),
+                benchmarkFromDate,
+                benchmarkOrderFrom,
                 "Prenos:ParityBenchmarkMode");
         }
 
@@ -1728,49 +1682,9 @@ public sealed class PrenosJob
             $"gcCollections={gc0}/{gc1}/{gc2}";
     }
 
-    private void InitializeDiagnosticsLog(string outputDirectory)
-    {
-        if (!_options.EnableDiagnosticsFileLog)
-        {
-            _diagnosticsLogPath = null;
-            return;
-        }
-
-        Directory.CreateDirectory(outputDirectory);
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var filePattern = string.IsNullOrWhiteSpace(_options.DiagnosticsLogFilePattern)
-            ? "diagnostics-{timestamp}.log"
-            : _options.DiagnosticsLogFilePattern;
-        var fileName = filePattern.Replace("{timestamp}", stamp);
-        _diagnosticsLogPath = Path.IsPathRooted(fileName)
-            ? fileName
-            : Path.Combine(outputDirectory, fileName);
-        var header = new[]
-        {
-            $"# diagnostics-log-start={DateTime.UtcNow:O}",
-            $"# machine={Environment.MachineName}",
-            $"# process={Process.GetCurrentProcess().Id}",
-            $"# orderConcurrency={Math.Max(1, _options.OrderConcurrency)}",
-            $"# maxSapCallsInFlight={Math.Max(1, _options.MaxSapCallsInFlight)}",
-            $"# sapCallWarnMs={Math.Max(0, _options.SapCallWarnMs)}",
-            $"# sapWaitWarnMs={Math.Max(0, _options.SapWaitWarnMs)}",
-            $"# orderTraceWarnMs={Math.Max(1, _options.OrderTraceWarnMs)}"
-        };
-        File.WriteAllText(_diagnosticsLogPath, string.Join(Environment.NewLine, header) + Environment.NewLine);
-    }
-
     private void WriteDiagnosticLine(string message)
     {
         Console.WriteLine(message);
-        if (string.IsNullOrWhiteSpace(_diagnosticsLogPath))
-        {
-            return;
-        }
-
-        lock (_diagnosticsLogSync)
-        {
-            File.AppendAllText(_diagnosticsLogPath, message + Environment.NewLine);
-        }
     }
 
     private static async Task<T> TimedAsync<T>(TimingCollector collector, string step, Func<Task<T>> action)
