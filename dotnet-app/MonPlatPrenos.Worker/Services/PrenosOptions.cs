@@ -95,9 +95,9 @@ public sealed class OrderHeaderFieldMap
     public string SystemStatus { get; set; } = "SYSTEM_STATUS";
     public string PlannedQuantity { get; set; } = "TARGET_QUANTITY";
     public string StartDate { get; set; } = "PRODUCTION_START_DATE";
-    public string SchedulerCode { get; set; } = "PROD_SCHED";
+    public string SchedulerCode { get; set; } = "";
     public string Plant { get; set; } = "PRODUCTION_PLANT";
-    public string WorkCenter { get; set; } = "WORK_CENTER";
+    public string WorkCenter { get; set; } = "";
 }
 
 public sealed class OperationFieldMap
@@ -126,7 +126,7 @@ public sealed class ConfirmationFieldMap
 public sealed class AfruFieldMap
 {
     public string WorkCenterId { get; set; } = "ARBID";
-    public string Yield { get; set; } = "LMNGA";
+    public string Yield { get; set; } = "GMNGA";
     public string Reversed { get; set; } = "STOKZ";
 }
 
