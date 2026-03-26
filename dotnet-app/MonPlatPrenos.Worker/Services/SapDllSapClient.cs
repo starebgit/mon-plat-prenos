@@ -246,7 +246,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 4, fieldName: "OPERATION");
+        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 4);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -296,7 +296,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 6, fieldName: "COMPONENT");
+        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 5);
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -1574,48 +1574,12 @@ public sealed class SapDllSapClient : ISapClient
         }
     }
 
-    private static void SetOrderObjectFlagWithDelphiParity(object function, int delphiIndex, string fieldName)
+    private static void SetOrderObjectFlagWithDelphiParity(object function, int delphiIndex)
     {
-        // Delphi writes ORDER_OBJECTS with 1-based positional indexes.
-        // NCo SetValue(int, object) is 0-based, so we must first translate to delphiIndex-1.
-        // Keep defensive fallbacks for wrappers with different behavior.
+        // Strict Delphi parity: write ORDER_OBJECTS by positional index only.
+        // Delphi is 1-based, NCo SetValue(int, object) is 0-based.
         var zeroBasedIndex = delphiIndex > 0 ? delphiIndex - 1 : delphiIndex;
-        SetOrderObjectFlag(function, fieldName, zeroBasedIndex, delphiIndex, 6, 5, 4, 3);
-    }
-
-    private static void SetOrderObjectFlag(object function, string fieldName, params int[] fallbackIndexes)
-    {
-        var structure = GetStructure(function, "ORDER_OBJECTS");
-        var setValueByName = SetValueNameObjectCache.GetOrAdd(structure.GetType(), t => t.GetMethod("SetValue", new[] { typeof(string), typeof(object) }));
-        if (setValueByName is not null)
-        {
-            try
-            {
-                setValueByName.Invoke(structure, new object[] { fieldName, "X" });
-                return;
-            }
-            catch
-            {
-                // fall through to strict index mode for wrappers that reject name-based writes here
-            }
-        }
-
-        var indexes = fallbackIndexes is { Length: > 0 } ? fallbackIndexes : new[] { 0 };
-        Exception? lastException = null;
-        foreach (var index in indexes)
-        {
-            try
-            {
-                SetOrderObjectsByIndex(function, index);
-                return;
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-            }
-        }
-
-        throw new InvalidOperationException($"Failed to set ORDER_OBJECTS flag '{fieldName}' using fallback index mode.", lastException);
+        SetOrderObjectsByIndex(function, zeroBasedIndex);
     }
 
     private static object GetStructure(object function, string structureName)
