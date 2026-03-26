@@ -15,12 +15,7 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         var runOnce = args.Any(a => string.Equals(a, "--run-once", StringComparison.OrdinalIgnoreCase));
-        var runParityBenchmark = args.Any(a => string.Equals(a, "--parity-benchmark", StringComparison.OrdinalIgnoreCase));
         var runSapPreflight = args.Any(a => string.Equals(a, "--sap-preflight", StringComparison.OrdinalIgnoreCase));
-        if (runParityBenchmark)
-        {
-            runOnce = true;
-        }
 
         var host = Host.CreateDefaultBuilder(args)
             .ConfigureAppConfiguration((_, config) =>
@@ -71,9 +66,7 @@ public static class Program
             {
                 var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
                 var runDate = TryGetDateArg(args, "--from-date");
-                Console.WriteLine(runParityBenchmark
-                    ? "RUN PARITY-BENCHMARK MODE"
-                    : $"RUN-ONCE PRENOS DAY : {(runDate.HasValue ? runDate.Value.ToString("yyyy-MM-dd") : "ALL")}");
+                Console.WriteLine($"RUN-ONCE PRENOS DAY : {(runDate.HasValue ? runDate.Value.ToString("yyyy-MM-dd") : "ALL")}");
                 await job.RunAsync(runDate, System.Threading.CancellationToken.None).ConfigureAwait(false);
                 Console.WriteLine("RUN-ONCE PRENOS DONE");
             }
