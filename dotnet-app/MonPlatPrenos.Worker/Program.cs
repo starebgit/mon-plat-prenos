@@ -1,5 +1,5 @@
 using System;
-using System.IO;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -15,7 +15,6 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         var runOnce = args.Any(a => string.Equals(a, "--run-once", StringComparison.OrdinalIgnoreCase));
-        var runSapPreflight = args.Any(a => string.Equals(a, "--sap-preflight", StringComparison.OrdinalIgnoreCase));
 
         var host = Host.CreateDefaultBuilder(args)
             .ConfigureAppConfiguration((_, config) =>
@@ -38,36 +37,44 @@ public static class Program
             })
             .Build();
 
-        if (runSapPreflight)
-        {
-            using (var scope = host.Services.CreateScope())
-            {
-                var options = scope.ServiceProvider.GetRequiredService<IOptions<PrenosOptions>>().Value;
-                var sapClient = scope.ServiceProvider.GetRequiredService<ISapClient>();
-
-                Console.WriteLine("RUN SAP PREFLIGHT (discovery + validation)");
-                var report = await sapClient.BuildDiscoveryReportAsync(System.Threading.CancellationToken.None).ConfigureAwait(false);
-                var outputDirectory = string.IsNullOrWhiteSpace(options.OutputDirectory) ? "output" : options.OutputDirectory;
-                Directory.CreateDirectory(outputDirectory);
-                var reportPath = Path.Combine(outputDirectory, $"sap-discovery-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-                File.WriteAllText(reportPath, report);
-                Console.WriteLine(report);
-                Console.WriteLine($"SAP discovery report written to: {reportPath}");
-
-                Console.WriteLine("SAP preflight discovery completed (strict validation skipped).");
-            }
-
-            return 0;
-        }
-
         if (runOnce)
         {
             using (var scope = host.Services.CreateScope())
             {
                 var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
                 var runDate = TryGetDateArg(args, "--from-date");
+                var firstChanceErrors = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+                EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs> handler = (_, eventArgs) =>
+                {
+                    var ex = eventArgs.Exception;
+                    if (!string.Equals(ex.GetType().FullName, "SAP.Middleware.Connector.RfcInvalidParameterException", StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    var topFrame = ex.StackTrace?
+                        .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                        .FirstOrDefault()?.Trim() ?? "<no-stack>";
+                    var key = $"{ex.Message}|{topFrame}";
+                    if (!firstChanceErrors.TryAdd(key, 0))
+                    {
+                        return;
+                    }
+
+                    Console.WriteLine($"SAP_PARAM_EXCEPTION firstChance=true message=\"{ex.Message}\" topFrame=\"{topFrame}\"");
+                };
+
                 Console.WriteLine($"RUN-ONCE PRENOS DAY : {(runDate.HasValue ? runDate.Value.ToString("yyyy-MM-dd") : "ALL")}");
-                await job.RunAsync(runDate, System.Threading.CancellationToken.None).ConfigureAwait(false);
+                AppDomain.CurrentDomain.FirstChanceException += handler;
+                try
+                {
+                    await job.RunAsync(runDate, System.Threading.CancellationToken.None).ConfigureAwait(false);
+                }
+                finally
+                {
+                    AppDomain.CurrentDomain.FirstChanceException -= handler;
+                    Console.WriteLine($"SAP_PARAM_EXCEPTION_SUMMARY uniqueFirstChance={firstChanceErrors.Count}");
+                }
                 Console.WriteLine("RUN-ONCE PRENOS DONE");
             }
 
