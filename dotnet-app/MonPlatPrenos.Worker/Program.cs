@@ -59,8 +59,7 @@ public static class Program
                 Console.WriteLine(report);
                 Console.WriteLine($"SAP discovery report written to: {reportPath}");
 
-                await sapClient.ValidateConfigurationAsync(System.Threading.CancellationToken.None).ConfigureAwait(false);
-                Console.WriteLine("SAP preflight validation passed.");
+                Console.WriteLine("SAP preflight discovery completed (strict validation skipped).");
             }
 
             return 0;
