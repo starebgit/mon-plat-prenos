@@ -88,6 +88,7 @@ public sealed class SapDllSapClient : ISapClient
     private static readonly ConcurrentDictionary<Type, MethodInfo?> GetTableMethodCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> GetStructureMethodCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueNameObjectCache = new();
+    private static readonly ConcurrentDictionary<string, byte> InvalidParameterProbeLogOnce = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> SetValueIndexObjectCache = new();
     private static readonly ConcurrentDictionary<Type, MethodInfo?> AppendMethodCache = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> CurrentRowPropertyCache = new();
@@ -1803,8 +1804,16 @@ public sealed class SapDllSapClient : ISapClient
             value = accessor(target, fieldName);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            if (ex.GetType().Name == "RfcInvalidParameterException")
+            {
+                var key = $"{target.GetType().FullName}|{fieldName}";
+                if (InvalidParameterProbeLogOnce.TryAdd(key, 0))
+                {
+                    Console.WriteLine($"SAP probe miss (first occurrence): type={target.GetType().Name} field={fieldName}");
+                }
+            }
             value = string.Empty;
             return false;
         }
