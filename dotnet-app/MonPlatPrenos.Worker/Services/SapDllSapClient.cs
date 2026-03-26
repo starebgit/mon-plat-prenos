@@ -296,7 +296,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 5, fieldName: "COMPONENT");
+        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 6, fieldName: "COMPONENT");
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -1576,11 +1576,11 @@ public sealed class SapDllSapClient : ISapClient
 
     private static void SetOrderObjectFlagWithDelphiParity(object function, int delphiIndex, string fieldName)
     {
-        // Delphi writes ORDER_OBJECTS with 1-based positional indexes (value(4|5)).
+        // Delphi writes ORDER_OBJECTS with 1-based positional indexes.
         // NCo SetValue(int, object) is 0-based, so we must first translate to delphiIndex-1.
         // Keep defensive fallbacks for wrappers with different behavior.
         var zeroBasedIndex = delphiIndex > 0 ? delphiIndex - 1 : delphiIndex;
-        SetOrderObjectFlag(function, fieldName, zeroBasedIndex, delphiIndex, 4, 5, 3);
+        SetOrderObjectFlag(function, fieldName, zeroBasedIndex, delphiIndex, 6, 5, 4, 3);
     }
 
     private static void SetOrderObjectFlag(object function, string fieldName, params int[] fallbackIndexes)
