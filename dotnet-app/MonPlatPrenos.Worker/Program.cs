@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -43,38 +42,8 @@ public static class Program
             {
                 var job = scope.ServiceProvider.GetRequiredService<PrenosJob>();
                 var runDate = TryGetDateArg(args, "--from-date");
-                var firstChanceErrors = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
-                EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs> handler = (_, eventArgs) =>
-                {
-                    var ex = eventArgs.Exception;
-                    if (!string.Equals(ex.GetType().FullName, "SAP.Middleware.Connector.RfcInvalidParameterException", StringComparison.Ordinal))
-                    {
-                        return;
-                    }
-
-                    var topFrame = ex.StackTrace?
-                        .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                        .FirstOrDefault()?.Trim() ?? "<no-stack>";
-                    var key = $"{ex.Message}|{topFrame}";
-                    if (!firstChanceErrors.TryAdd(key, 0))
-                    {
-                        return;
-                    }
-
-                    Console.WriteLine($"SAP_PARAM_EXCEPTION firstChance=true message=\"{ex.Message}\" topFrame=\"{topFrame}\"");
-                };
-
                 Console.WriteLine($"RUN-ONCE PRENOS DAY : {(runDate.HasValue ? runDate.Value.ToString("yyyy-MM-dd") : "ALL")}");
-                AppDomain.CurrentDomain.FirstChanceException += handler;
-                try
-                {
-                    await job.RunAsync(runDate, System.Threading.CancellationToken.None).ConfigureAwait(false);
-                }
-                finally
-                {
-                    AppDomain.CurrentDomain.FirstChanceException -= handler;
-                    Console.WriteLine($"SAP_PARAM_EXCEPTION_SUMMARY uniqueFirstChance={firstChanceErrors.Count}");
-                }
+                await job.RunAsync(runDate, System.Threading.CancellationToken.None).ConfigureAwait(false);
                 Console.WriteLine("RUN-ONCE PRENOS DONE");
             }
 
