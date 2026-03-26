@@ -296,7 +296,7 @@ public sealed class SapDllSapClient : ISapClient
     {
         var function = CreateFunction("BAPI_PRODORD_GET_DETAIL");
         SetImport(function, "NUMBER", orderNumber);
-        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 5, fieldName: "COMPONENT");
+        SetOrderObjectFlagWithDelphiParity(function, delphiIndex: 6, fieldName: "COMPONENT");
 
         var invokeSw = Stopwatch.StartNew();
         InvokeFunction(function);
@@ -465,11 +465,7 @@ public sealed class SapDllSapClient : ISapClient
             _fieldMap.Afru.Yield,
             _fieldMap.Afru.Reversed);
 
-        var mrpFields = GetContainerFieldNames("BAPI_MATERIAL_STOCK_REQ_LIST", "MRP_LIST");
-        if (mrpFields.Count > 0 && mrpFields.Count < 48)
-        {
-            errors.Add($"BAPI_MATERIAL_STOCK_REQ_LIST.MRP_LIST has {mrpFields.Count} fields, but code reads index 48 with Delphi parity.");
-        }
+        ValidateFields(errors, "BAPI_MATERIAL_STOCK_REQ_LIST", "MRP_LIST", "PLNT_STOCK");
 
         if (errors.Count > 0)
         {
@@ -481,33 +477,9 @@ public sealed class SapDllSapClient : ISapClient
 
     private static int ReadMaterialStockWithDelphiParity(object function)
     {
-        // Delphi parity: funct1.imports('MRP_LIST').value(48)
-        var importObject = GetImportObject(function, "MRP_LIST");
-        var stock = ParseInt(GetByIndex(importObject, 48));
-        if (stock != 0)
-        {
-            return stock;
-        }
-
-        // Fallback for NCo environments where MRP_LIST is exposed as structure.
+        // NCo-safe deterministic read: take explicit MRP_LIST field PLNT_STOCK.
         var structure = GetStructure(function, "MRP_LIST");
-        stock = ParseInt(GetByIndex(structure, 48));
-        if (stock != 0)
-        {
-            return stock;
-        }
-
-        // Conservative named fallbacks.
-        foreach (var fieldName in new[] { "LABST", "TOTAL_STOCK", "TOT_STOCK", "STOCK" })
-        {
-            stock = ParseInt(GetString(structure, fieldName));
-            if (stock != 0)
-            {
-                return stock;
-            }
-        }
-
-        return 0;
+        return ParseInt(GetString(structure, "PLNT_STOCK"));
     }
 
     private void AppendFunctionDiscovery(StringBuilder sb, string functionName, params string[] containersToInspect)
@@ -1604,11 +1576,11 @@ public sealed class SapDllSapClient : ISapClient
 
     private static void SetOrderObjectFlagWithDelphiParity(object function, int delphiIndex, string fieldName)
     {
-        // Delphi writes ORDER_OBJECTS with 1-based positional indexes (value(4|5)).
+        // Delphi writes ORDER_OBJECTS with 1-based positional indexes.
         // NCo SetValue(int, object) is 0-based, so we must first translate to delphiIndex-1.
         // Keep defensive fallbacks for wrappers with different behavior.
         var zeroBasedIndex = delphiIndex > 0 ? delphiIndex - 1 : delphiIndex;
-        SetOrderObjectFlag(function, fieldName, zeroBasedIndex, delphiIndex, 4, 5, 3);
+        SetOrderObjectFlag(function, fieldName, zeroBasedIndex, delphiIndex, 6, 5, 4, 3);
     }
 
     private static void SetOrderObjectFlag(object function, string fieldName, params int[] fallbackIndexes)
