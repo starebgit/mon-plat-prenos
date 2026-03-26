@@ -31,9 +31,8 @@ public sealed class PrenosJob
     public async Task RunAsync(DateTime? forDate, CancellationToken cancellationToken)
     {
         var runSw = Stopwatch.StartNew();
-        var parityBenchmarkModeEnabled = _options.ParityBenchmarkMode.Enabled;
-        var parityModeEnabled = _options.ParityMode.Enabled || parityBenchmarkModeEnabled;
-        var benchmarkEnabled = _options.Benchmark.Enabled || parityBenchmarkModeEnabled;
+        var parityModeEnabled = true;
+        var benchmarkEnabled = _options.Benchmark.Enabled;
         var outputDirectory = GetOutputDirectoryPath();
         InitializeDiagnosticsLog(outputDirectory);
         var effectiveFromDate = ResolveFromDate(forDate, parityModeEnabled);
@@ -41,7 +40,7 @@ public sealed class PrenosJob
 
         var plant = _options.Plant;
         var orderFrom = ResolveOrderFrom(parityModeEnabled);
-        Console.WriteLine($"Run mode: {(parityBenchmarkModeEnabled ? "PARITY-BENCHMARK" : parityModeEnabled ? "PARITY" : "NORMAL")}");
+        Console.WriteLine("Run mode: PARITY");
         Console.WriteLine($"Output directory: {outputDirectory}");
         Console.WriteLine($"Effective fromDate: {(activeFromDateFilter.HasValue ? activeFromDateFilter.Value.ToString("yyyy-MM-dd") : "ALL")}, orderFrom: {orderFrom}");
         if (!string.IsNullOrWhiteSpace(_diagnosticsLogPath))
@@ -140,11 +139,6 @@ public sealed class PrenosJob
                 activeFromDateFilter,
                 orderFrom,
                 cancellationToken);
-        }
-
-        if (parityBenchmarkModeEnabled)
-        {
-            await WriteParityBenchmarkRunLogAsync(runtimeMs, activeFromDateFilter, orderFrom, plateDemands.Count, unified.Count, semiFinished.Count, cancellationToken);
         }
 
         if (!parityModeEnabled)
