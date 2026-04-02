@@ -188,6 +188,65 @@ The worker now follows Delphi parity for the expensive semi-finished branch:
 - `Ulitki` classification is recorded, but no extra recursive AFRU expansion is performed,
 - `Protektor`/`Sponka`/`Obroc` stay as direct component categorization without additional SAP recursion.
 
+## Obroci today vs MB52-style querying
+
+Current implementation (`Obroc` category) is Delphi-parity oriented:
+- material components are read from each production order via `BAPI_PRODORD_GET_DETAIL`,
+- category detection is text-based (`Contains: "OBRO"` rule),
+- `zap` grouping (`1..8`) is inferred from short text tokens (`OBROČ 220`, `OBROČ 180`, `OBROČ 145`, `OBROČ 80/110/115`, optional `-4` suffix),
+- stock (`zaloga`) is fetched **per material code** using `BAPI_MATERIAL_STOCK_REQ_LIST` with plant only (`PLANT=1061` style), then consumed sequentially across grouped rows.
+
+This means the worker does **not** currently replicate an SAP `MB52` search pattern such as:
+- plant `1061`,
+- storage location `0013`,
+- material short text wildcard `*spirala*`,
+- aggregate stock/plan over the exact MB52 material set.
+
+### If you need MB52-equivalent Spirala/Obroci reporting
+
+Best path is to continue with this app and add a dedicated, configurable "inventory query pipeline" (instead of rewriting from scratch):
+1. Add query inputs in configuration/database (`plant`, `storageLocation`, `shortTextLike`, `groupKey`, `isActive`).
+2. Implement a SAP query step that returns the material list matching short-text criteria for that scope.
+3. Fetch stock and planned requirements for the returned material set (same scope), then aggregate by selected key (material family/type/zap).
+4. Keep existing order-component pipeline for Delphi parity outputs; expose the new MB52-style output as a separate dataset/table/report.
+
+Why this approach:
+- preserves validated production-order logic already migrated from Delphi,
+- isolates new MB52-style logic as additive functionality (lower migration risk),
+- allows gradual cut-over by comparing old/new outputs in parallel.
+
+### If Delphi is already deployed in production
+
+Then a full rewrite is usually **not** the best next step.
+
+Prefer one of these two tracks:
+1. **Stabilize-and-extend this .NET worker** (recommended): keep Delphi as fallback, add MB52-style query output here, and switch consumers only after parity checks pass.
+2. **Freeze migration**: keep Delphi as source of truth and only build a small sidecar service for MB52-specific aggregation if .NET modernization is no longer a business goal.
+
+In short: because Delphi already runs in production, treat this as an incremental replacement/augmentation program, not a greenfield rewrite.
+
+### Repository strategy for 3 related codebases
+
+If you need coordinated work across:
+- `informatorSAP` (new solution host/integration point),
+- legacy `monplat prenos` (Delphi, production baseline),
+- new `monplatprenos` (.NET worker),
+
+the best default is a **single workspace with all three projects available** (mono-repo or meta-repo layout).
+
+Recommended structure:
+1. `apps/informatorSAP/`
+2. `apps/monplat-prenos-delphi/`
+3. `apps/monplat-prenos-dotnet/`
+4. shared `docs/` for architecture, parity matrices, SAP contract mapping, and migration decisions.
+
+Why this is helpful:
+- enables end-to-end traceability (Delphi behavior ↔ .NET behavior ↔ integration host),
+- makes parity verification artifacts/versioning easier,
+- avoids context loss between separate repositories during migration.
+
+Operational note: if history size or access control is a concern, keep each project as a submodule/subtree while still using one orchestration repository for docs, tests, and release coordination.
+
 ## Phase 3 confirmation/detail cleanup
 
 Phase 3 extends the typed hot-path to `GetConfirmationsAsync`, including typed/fast field access when fetching `BAPI_PRODORDCONF_GETDETAIL` for zero-yield rows.
